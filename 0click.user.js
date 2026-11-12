@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         0click
 // @namespace    https://github.com/mobility22/0click
-// @version      1.11
+// @version      1.12
 // @description  Read-only AutoContour Zero-Click Jobs History summary
 // @match        http://10.240.61.81:18001/*
 // @updateURL    https://raw.githubusercontent.com/mobility22/0click/refs/heads/main/0click.user.js
@@ -12,13 +12,13 @@
 // @inject-into  page
 // ==/UserScript==
 
-// 0click 1.11 — AutoContour Zero-Click Jobs History summary (read-only)
+// 0click 1.12 — AutoContour Zero-Click Jobs History summary (read-only)
 
 (function () {
   'use strict';
   const TAG = '[0click]';
-  const SCRIPT_VERSION = '1.11';
-  const PANEL_TITLE = '0click 1.11';
+  const SCRIPT_VERSION = '1.12';
+  const PANEL_TITLE = '0click 1.12';
   const PANEL_ID = 'zclick-panel';
   const DEBOUNCE_MS = 250;
   const PAGE_SIZE = 500;
@@ -1348,11 +1348,11 @@
     const host = document.getElementById(PANEL_ID);
     if (host) {
       if (collapsed) {
-        if (!host.dataset.openHeight) host.dataset.openHeight = host.style.height || '520px';
+        if (!host.dataset.openHeight) host.dataset.openHeight = host.style.height || '600px';
         host.style.height = 'auto';
         host.style.resize = 'none';
       } else {
-        host.style.height = host.dataset.openHeight || '520px';
+        host.style.height = host.dataset.openHeight || '600px';
         host.style.resize = 'both';
       }
     }
@@ -1367,24 +1367,24 @@
     if (document.getElementById(PANEL_ID)) return;
     const panel = document.createElement('div');
     panel.id = PANEL_ID;
-    panel.style.cssText = 'position:fixed;bottom:16px;right:16px;top:auto;z-index:99999;width:700px;max-width:calc(100vw - 32px);min-width:520px;min-height:180px;height:520px;max-height:calc(100vh - 32px);resize:both;overflow:hidden;background:transparent;';
+    panel.style.cssText = 'position:fixed;bottom:16px;right:16px;top:auto;z-index:99999;width:800px;max-width:calc(100vw - 32px);min-width:600px;min-height:210px;height:600px;max-height:calc(100vh - 32px);resize:both;overflow:hidden;background:transparent;';
     // Closed shadow root so Ctrl+F does not match panel text (including patient names).
     panelShadow = panel.attachShadow({ mode: 'closed' });
     panelShadow.innerHTML =
       '<style>' +
-      ':host, .wrap { font: 12px/1.35 sans-serif; color: #111; }' +
+      ':host, .wrap { font: 14px/1.35 sans-serif; color: #111; }' +
       '.wrap { width: 100%; height: 100%; background: #fff; border: 2px solid #1565c0; border-radius: 8px; box-shadow: 0 3px 10px rgba(0,0,0,.35); box-sizing: border-box; display: flex; flex-direction: column; overflow: hidden; }' +
-      '.bar { display: flex; align-items: center; gap: 6px; padding: 8px 10px; background: #1565c0; color: #fff; flex: 0 0 auto; }' +
+      '.bar { display: flex; align-items: center; gap: 7px; padding: 9px 12px; background: #1565c0; color: #fff; flex: 0 0 auto; }' +
       '.head { flex: 1; min-width: 0; }' +
-      '.title { font-weight: bold; font-size: 15px; }' +
-      '.bar button { font-size: 12px; padding: 3px 8px; border: 0; border-radius: 4px; background: #fff; color: #1565c0; font-weight: bold; cursor: pointer; }' +
-      '.totals { padding: 6px 10px 6px; font-size: 12px; color: #333; flex: 0 0 auto; }' +
+      '.title { font-weight: bold; font-size: 18px; }' +
+      '.bar button { font-size: 14px; padding: 4px 9px; border: 0; border-radius: 4px; background: #fff; color: #1565c0; font-weight: bold; cursor: pointer; }' +
+      '.totals { padding: 7px 12px 7px; font-size: 14px; color: #333; flex: 0 0 auto; }' +
       '.body { padding: 0 0 0; overflow: auto; flex: 1 1 auto; min-height: 0; border-top: 1px solid #e0e0e0; }' +
       '.wrap.collapsed .totals, .wrap.collapsed .locate-note, .wrap.collapsed .body { display: none; }' +
       '.wrap.collapsed { height: auto; }' +
-      '.empty { color: #555; font-style: italic; margin: 8px 10px; }' +
+      '.empty { color: #555; font-style: italic; margin: 9px 12px; }' +
       'table.grid { width: 100%; border-collapse: collapse; table-layout: auto; }' +
-      'table.grid th, table.grid td { border: 1px solid #c5d4e8; padding: 5px 7px; vertical-align: top; text-align: left; }' +
+      'table.grid th, table.grid td { border: 1px solid #c5d4e8; padding: 6px 8px; vertical-align: top; text-align: left; }' +
       'table.grid thead th { position: sticky; top: 0; background: #1565c0; color: #fff; z-index: 1; font-weight: 700; box-shadow: 0 1px 0 #0d47a1; }' +
       'table.grid tbody tr.day-today td { background: #e3f2fd; border-left: 4px solid #1976d2; }' +
       'table.grid tbody tr.day-yesterday.day-split td { border-top: 2px solid #90a4ae; }' +
@@ -1395,16 +1395,16 @@
       'table.grid tbody tr.alert .patient-link, table.grid tbody tr.day-yesterday.alert .patient-link { color: #bf360c; }' +
       '.error-count { color: #c62828; font-weight: 800; }' +
       '.cell-line.series-error { color: #b71c1c; font-weight: 700; }' +
-      '.status-chip { display: inline-block; margin-left: 5px; background: #c62828; color: #fff; font-size: 10px; font-weight: 800; line-height: 1.4; padding: 0 5px; border: 0; border-radius: 3px; vertical-align: middle; letter-spacing: .03em; font-family: inherit; cursor: pointer; }' +
+      '.status-chip { display: inline-block; margin-left: 5px; background: #c62828; color: #fff; font-size: 12px; font-weight: 800; line-height: 1.4; padding: 0 6px; border: 0; border-radius: 3px; vertical-align: middle; letter-spacing: .03em; font-family: inherit; cursor: pointer; }' +
       'table.grid tfoot td { position: sticky; bottom: 0; background: #eceff1; color: #546e7a; font-weight: 700; box-shadow: 0 -1px 0 #cfd8dc; }' +
-      'th.patient-col, td.patient-cell { width: 9em; max-width: 9em; box-sizing: border-box; }' +
+      'th.patient-col, td.patient-cell { width: 10.5em; max-width: 10.5em; box-sizing: border-box; }' +
       'td.patient-cell { font-weight: 600; white-space: nowrap; overflow: hidden; }' +
       'button.patient-link { background: none; border: 0; padding: 0; font: inherit; font-weight: 600; color: #0d47a1; text-decoration: underline; cursor: pointer; display: inline-block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: middle; text-align: left; }' +
       'td.time { white-space: nowrap; color: #333; }' +
-      '.alert-mark { display: inline-block; margin-right: 4px; background: #ef6c00; color: #fff; font-weight: 800; font-size: 10px; line-height: 1.4; padding: 0 5px; border-radius: 3px; vertical-align: middle; }' +
-      '.locate-note { display: none; padding: 4px 10px; font-size: 11px; color: #b71c1c; flex: 0 0 auto; }' +
+      '.alert-mark { display: inline-block; margin-right: 4px; background: #ef6c00; color: #fff; font-weight: 800; font-size: 12px; line-height: 1.4; padding: 0 6px; border-radius: 3px; vertical-align: middle; }' +
+      '.locate-note { display: none; padding: 5px 12px; font-size: 13px; color: #b71c1c; flex: 0 0 auto; }' +
       '.cell-lines { display: flex; flex-direction: column; gap: 1px; }' +
-      '.cell-line { font-size: 11px; line-height: 1.35; }' +
+      '.cell-line { font-size: 13px; line-height: 1.35; }' +
       '.cell-line.unmatched { }' +
       '.cell-line.matched { }' +
       '.none { color: #888; }' +

@@ -11,10 +11,10 @@ function check(name, got, expected) {
   console.log((ok ? 'PASS' : 'FAIL') + ' ' + name + ' got ' + JSON.stringify(got) + ' expected ' + JSON.stringify(expected));
 }
 
-check('script @version 1.11', /@version\s+1\.11\b/.test(src), true);
-check('script SCRIPT_VERSION', /const SCRIPT_VERSION = '1\.11'/.test(src), true);
-check('script header comment 0click 1.11', /\/\/ 0click 1\.11\b/.test(src), true);
-check('script PANEL_TITLE', /const PANEL_TITLE = '0click 1\.11'/.test(src), true);
+check('script @version 1.12', /@version\s+1\.12\b/.test(src), true);
+check('script SCRIPT_VERSION', /const SCRIPT_VERSION = '1\.12'/.test(src), true);
+check('script header comment 0click 1.12', /\/\/ 0click 1\.12\b/.test(src), true);
+check('script PANEL_TITLE', /const PANEL_TITLE = '0click 1\.12'/.test(src), true);
 check('script has no ID copied toast text', src.indexOf('ID copied') === -1, true);
 check('script has no whole-row has-error class', src.indexOf('has-error') === -1, true);
 check('script @run-at document-start', /@run-at\s+document-start/.test(src), true);
@@ -191,7 +191,7 @@ function loadApi(html) {
   check('panel host light DOM has no patient text', light.indexOf(P1_NAME) === -1 && light.indexOf(P2_NAME) === -1 && light.indexOf(P1) === -1 && light.indexOf(P2) === -1, true);
   const root = api.panelRoot();
   check('panel uses closed shadow root', !!(root && root.mode === 'closed'), true);
-  check('panel title is 0click 1.11', !!(root && root.querySelector('.title') && root.querySelector('.title').textContent === '0click 1.11'), true);
+  check('panel title is 0click 1.12', !!(root && root.querySelector('.title') && root.querySelector('.title').textContent === '0click 1.12'), true);
   check('panel has refresh button', !!(root && root.querySelector('.refresh')), true);
   check('panel header has no date-range subtitle', !!(root && !root.querySelector('.range')), true);
   check('panel header has no source line', !!(root && !root.querySelector('.source')), true);
@@ -297,6 +297,7 @@ function loadApi(html) {
   check('footer has no combined or today tally', foot.join(' ').indexOf('3 series') === -1 && foot.join(' ').indexOf('5 series') === -1 && foot.join(' ').indexOf('3 unmatched') === -1, true);
   check('footer has no yesterday section header', !!(grid && grid.querySelector('tfoot') && grid.querySelector('tfoot').textContent.indexOf('YESTERDAY') === -1 && grid.querySelector('tfoot').textContent.indexOf('TODAY') === -1), true);
   check('panel is anchored bottom-right', host && host.style.bottom === '16px' && host.style.right === '16px' && (!host.style.top || host.style.top === 'auto'), true);
+  check('panel is a bit larger with max-height', !!(host && host.style.width === '800px' && host.style.height === '600px' && host.style.minWidth === '600px' && /100vh/.test(host.style.maxHeight) && /32px/.test(host.style.maxHeight)), true);
 
   // Clickable name: first/topmost page row for P1 is CT HEAD
   const pageDoc = window.document;
@@ -311,7 +312,13 @@ function loadApi(html) {
   check('patient buttons show name only', links.map(b => b.textContent), [P1_NAME, P2_NAME, P1_NAME, P2_NAME]);
   check('patient button titles are the name without IDs', links.map(b => b.title), [P1_NAME, P2_NAME, P1_NAME, P2_NAME]);
   check('patient cells and titles do not include IDs', links.every(b => b.textContent.indexOf('(') === -1 && b.title.indexOf('000000') === -1 && b.title.indexOf('111111') === -1 && b.title.indexOf('(') === -1), true);
-  check('patient column CSS is narrow with ellipsis', panelCss.indexOf('th.patient-col') !== -1 && panelCss.indexOf('max-width: 9em') !== -1 && panelCss.indexOf('text-overflow: ellipsis') !== -1 && /td\.patient-cell/.test(panelCss), true);
+  check('patient column CSS is narrow with ellipsis', panelCss.indexOf('th.patient-col') !== -1 && panelCss.indexOf('max-width: 10.5em') !== -1 && panelCss.indexOf('text-overflow: ellipsis') !== -1 && /td\.patient-cell/.test(panelCss), true);
+  check('base font is 14px', panelCss.indexOf('font: 14px/1.35 sans-serif') !== -1, true);
+  check('title font is 18px', panelCss.indexOf('font-size: 18px') !== -1, true);
+  check('stats line font is 14px', /\.totals \{[^}]*font-size: 14px/.test(panelCss), true);
+  check('cell lines use 13px', /\.cell-line \{ font-size: 13px/.test(panelCss), true);
+  check('status chips use 12px', /\.status-chip \{[^}]*font-size: 12px/.test(panelCss), true);
+  check('table body still scrolls inside the panel', /\.body \{[^}]*overflow: auto/.test(panelCss), true);
   links[0].click();
   check('locate prefers the first matched series row', window.__zclickScrolls[0] && window.__zclickScrolls[0].id, matchedJob && matchedJob.id);
   check('locate does not use the unmatched row first', window.__zclickScrolls[0] && window.__zclickScrolls[0].id !== (firstJob && firstJob.id), true);
