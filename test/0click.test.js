@@ -11,10 +11,12 @@ function check(name, got, expected) {
   console.log((ok ? 'PASS' : 'FAIL') + ' ' + name + ' got ' + JSON.stringify(got) + ' expected ' + JSON.stringify(expected));
 }
 
-check('script @version 1.8', /@version\s+1\.8\b/.test(src), true);
-check('script SCRIPT_VERSION', /const SCRIPT_VERSION = '1\.8'/.test(src), true);
-check('script header comment 0click 1.8', /\/\/ 0click 1\.8\b/.test(src), true);
-check('script PANEL_TITLE', /const PANEL_TITLE = '0click 1\.8'/.test(src), true);
+check('script @version 1.9', /@version\s+1\.9\b/.test(src), true);
+check('script SCRIPT_VERSION', /const SCRIPT_VERSION = '1\.9'/.test(src), true);
+check('script header comment 0click 1.9', /\/\/ 0click 1\.9\b/.test(src), true);
+check('script PANEL_TITLE', /const PANEL_TITLE = '0click 1\.9'/.test(src), true);
+check('script has no ID copied toast text', src.indexOf('ID copied') === -1, true);
+check('script has no whole-row has-error class', src.indexOf('has-error') === -1, true);
 check('script @run-at document-start', /@run-at\s+document-start/.test(src), true);
 check('script @inject-into page', /@inject-into\s+page/.test(src), true);
 check('script @grant GM_setClipboard', /@grant\s+GM_setClipboard/.test(src), true);
@@ -175,7 +177,7 @@ function loadApi(html) {
   check('panel host light DOM has no patient text', light.indexOf(P1) === -1 && light.indexOf(P2) === -1, true);
   const root = api.panelRoot();
   check('panel uses closed shadow root', !!(root && root.mode === 'closed'), true);
-  check('panel title is 0click 1.8', !!(root && root.querySelector('.title') && root.querySelector('.title').textContent === '0click 1.8'), true);
+  check('panel title is 0click 1.9', !!(root && root.querySelector('.title') && root.querySelector('.title').textContent === '0click 1.9'), true);
   check('panel has refresh button', !!(root && root.querySelector('.refresh')), true);
   check('panel header has no date-range subtitle', !!(root && !root.querySelector('.range')), true);
   check('panel header has no source line', !!(root && !root.querySelector('.source')), true);
@@ -297,8 +299,8 @@ function loadApi(html) {
   check('locate does not click the page row', window.__zclickPageClicks.length, 0);
   const copiedNote = (root.querySelector('.locate-note') || {}).textContent || '';
   check('click copies ID via GM_setClipboard', window.__zclickClipboard.map(x => x.via + ':' + x.data), ['gm:000000']);
-  check('click shows ID copied note', copiedNote, 'ID copied');
-  check('ID copied note does not display the ID', copiedNote.indexOf('000000') === -1, true);
+  check('click does not show an ID copied note', copiedNote, '');
+  check('click note does not display the ID', copiedNote.indexOf('000000') === -1, true);
   check('click does not log the ID', logs.join('\n').indexOf('000000') === -1, true);
 
   const yesterdayP1 = { patient: P1, matched: [], unmatched: [{ series: 'MR BRAIN', submitted: '2026-11-11 09:00:00' }] };
@@ -311,8 +313,9 @@ function loadApi(html) {
   const missingOk = api.locatePatient(missingGroup);
   const missingNote = (root.querySelector('.locate-note') || {}).textContent || '';
   check('missing page row returns false', missingOk, false);
-  check('missing page row shows not-on-page note', missingNote.indexOf('not on this page') !== -1, true);
-  check('missing page row also copies ID', missingNote.indexOf('ID copied') !== -1, true);
+  check('missing page row shows not-on-page note', missingNote, 'not on this page');
+  check('missing page row also copies ID', window.__zclickClipboard.map(x => x.via + ':' + x.data).indexOf('gm:222222') !== -1, true);
+  check('missing locate note has no ID copied text', missingNote.indexOf('ID copied') === -1, true);
   check('missing locate note does not display the ID', missingNote.indexOf('222222') === -1, true);
   check('missing locate does not log the name', logs.join('\n').indexOf('BROWN, PAT') === -1, true);
   check('missing locate does not log the ID', logs.join('\n').indexOf('222222') === -1, true);
@@ -378,7 +381,7 @@ function loadApi(html) {
   check('stats line appends red error count', !!(errSpan && errSpan.textContent === '4 errors' && /4 errors/.test(totals)), true);
   check('error count is in a red error-count span', !!(errSpan && errSpan.classList.contains('error-count')), true);
   const css = (root.querySelector('style') || {}).textContent || '';
-  check('error CSS uses red border with priority over orange', css.indexOf('has-error') !== -1 && css.indexOf('#c62828') !== -1 && css.indexOf('alert.has-error') !== -1, true);
+  check('error CSS keeps red chips and count, not a whole-row tint', css.indexOf('has-error') === -1 && css.indexOf('status-chip') !== -1 && css.indexOf('.error-count') !== -1 && css.indexOf('#c62828') !== -1 && css.indexOf('#ffcdd2') === -1, true);
 
   const todayRows = [...root.querySelectorAll('tr.day-today')];
   const yestRows = [...root.querySelectorAll('tr.day-yesterday')];
@@ -387,10 +390,10 @@ function loadApi(html) {
   const errYest = yestRows.find(tr => tr.textContent.indexOf(P_ERR) !== -1);
   const onlyYest = yestRows.find(tr => tr.textContent.indexOf(P_ONLY) !== -1);
 
-  check('patient with a matched series and an error is not unmatched-only', !!(errToday && errToday.classList.contains('has-error') && !errToday.classList.contains('alert')), true);
-  check('unmatched-only error row keeps the marker and red class', !!(onlyToday && onlyToday.classList.contains('alert') && onlyToday.classList.contains('has-error') && onlyToday.querySelector('.alert-mark')), true);
-  check('yesterday cancelled matched series is a red error row', !!(errYest && errYest.classList.contains('has-error') && !errYest.classList.contains('alert')), true);
-  check('yesterday timeout unmatched-only is red over orange', !!(onlyYest && onlyYest.classList.contains('has-error') && onlyYest.classList.contains('alert')), true);
+  check('patient with a matched series and an error is not unmatched-only', !!(errToday && errToday.classList.contains('day-today') && !errToday.classList.contains('alert') && !errToday.classList.contains('has-error')), true);
+  check('unmatched-only error row keeps the orange marker, not a red row', !!(onlyToday && onlyToday.classList.contains('alert') && !onlyToday.classList.contains('has-error') && onlyToday.querySelector('.alert-mark')), true);
+  check('yesterday cancelled matched series keeps the day tint, not a red row', !!(errYest && errYest.classList.contains('day-yesterday') && !errYest.classList.contains('has-error') && !errYest.classList.contains('alert')), true);
+  check('yesterday timeout unmatched-only stays orange, not a red row', !!(onlyYest && onlyYest.classList.contains('alert') && !onlyYest.classList.contains('has-error') && onlyYest.classList.contains('day-yesterday')), true);
 
   const errChips = errToday ? [...errToday.querySelectorAll('.status-chip')].map(c => c.textContent) : [];
   const onlyChips = onlyToday ? [...onlyToday.querySelectorAll('.status-chip')].map(c => c.textContent) : [];

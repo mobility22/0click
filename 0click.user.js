@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         0click
 // @namespace    https://github.com/mobility22/0click
-// @version      1.8
+// @version      1.9
 // @description  Read-only AutoContour Zero-Click Jobs History summary
 // @match        http://10.240.61.81:18001/*
 // @updateURL    https://raw.githubusercontent.com/mobility22/0click/refs/heads/main/0click.user.js
@@ -12,13 +12,13 @@
 // @inject-into  page
 // ==/UserScript==
 
-// 0click 1.8 — AutoContour Zero-Click Jobs History summary (read-only)
+// 0click 1.9 — AutoContour Zero-Click Jobs History summary (read-only)
 
 (function () {
   'use strict';
   const TAG = '[0click]';
-  const SCRIPT_VERSION = '1.8';
-  const PANEL_TITLE = '0click 1.8';
+  const SCRIPT_VERSION = '1.9';
+  const PANEL_TITLE = '0click 1.9';
   const PANEL_ID = 'zclick-panel';
   const DEBOUNCE_MS = 250;
   const PAGE_SIZE = 500;
@@ -1041,7 +1041,6 @@
     const msg = text ? String(text) : '';
     note.textContent = msg;
     note.style.display = msg ? 'block' : 'none';
-    note.classList.toggle('ok', msg === 'ID copied');
   }
   // Patient cell form: "LAST, FIRST (ID)". Use the last parentheses only.
   // Allowed ID characters: alphanumerics plus $ - _. Never log or store the ID.
@@ -1080,8 +1079,7 @@
   }
   function locateNotes(copyStatus, found) {
     const parts = [];
-    if (copyStatus === 'copied') parts.push('ID copied');
-    else if (copyStatus === 'missing') parts.push('ID not found');
+    if (copyStatus === 'missing') parts.push('ID not found');
     if (!found) parts.push('not on this page');
     return parts.join('. ');
   }
@@ -1210,8 +1208,7 @@
     let first = true;
     for (const g of daySummary.groups) {
       const alert = g.unmatchedCount > 0 && g.matchedCount === 0;
-      const hasError = (g.errorCount || 0) > 0;
-      const tr = el('tr', 'day-' + day + (alert ? ' alert' : '') + (hasError ? ' has-error' : '') + (splitFirst && first ? ' day-split' : ''));
+      const tr = el('tr', 'day-' + day + (alert ? ' alert' : '') + (splitFirst && first ? ' day-split' : ''));
       first = false;
       const ptd = el('td', 'patient-cell');
       if (alert) {
@@ -1373,9 +1370,6 @@
       'table.grid tbody tr.alert td { background: #ffe0b2; border-left: 5px solid #e65100; color: #4e342e; }' +
       'table.grid tbody tr.day-today.alert td, table.grid tbody tr.day-yesterday.alert td { background: #ffe0b2; border-left: 5px solid #e65100; color: #4e342e; }' +
       'table.grid tbody tr.alert .patient-link, table.grid tbody tr.day-yesterday.alert .patient-link { color: #bf360c; }' +
-      'table.grid tbody tr.has-error td { background: #ffcdd2; border-left: 5px solid #c62828; box-shadow: inset 0 0 0 1px #c62828; color: #b71c1c; }' +
-      'table.grid tbody tr.day-today.has-error td, table.grid tbody tr.day-yesterday.has-error td, table.grid tbody tr.alert.has-error td { background: #ffcdd2; border-left: 5px solid #c62828; box-shadow: inset 0 0 0 1px #c62828; color: #b71c1c; }' +
-      'table.grid tbody tr.has-error .patient-link, table.grid tbody tr.day-yesterday.has-error .patient-link { color: #b71c1c; }' +
       '.error-count { color: #c62828; font-weight: 800; }' +
       '.cell-line.series-error { color: #b71c1c; font-weight: 700; }' +
       '.status-chip { display: inline-block; margin-left: 5px; background: #c62828; color: #fff; font-size: 10px; font-weight: 800; line-height: 1.4; padding: 0 5px; border: 0; border-radius: 3px; vertical-align: middle; letter-spacing: .03em; font-family: inherit; cursor: pointer; }' +
@@ -1385,7 +1379,6 @@
       'td.time { white-space: nowrap; color: #333; }' +
       '.alert-mark { display: inline-block; margin-right: 4px; background: #ef6c00; color: #fff; font-weight: 800; font-size: 10px; line-height: 1.4; padding: 0 5px; border-radius: 3px; vertical-align: middle; }' +
       '.locate-note { display: none; padding: 4px 10px; font-size: 11px; color: #b71c1c; flex: 0 0 auto; }' +
-      '.locate-note.ok { color: #1565c0; }' +
       '.cell-lines { display: flex; flex-direction: column; gap: 1px; }' +
       '.cell-line { font-size: 11px; line-height: 1.35; }' +
       '.cell-line.unmatched { }' +
