@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         0click
 // @namespace    https://github.com/mobility22/0click
-// @version      1.6
+// @version      1.7
 // @description  Read-only AutoContour Zero-Click Jobs History summary
 // @match        http://10.240.61.81:18001/*
 // @updateURL    https://raw.githubusercontent.com/mobility22/0click/refs/heads/main/0click.user.js
@@ -12,13 +12,13 @@
 // @inject-into  page
 // ==/UserScript==
 
-// 0click 1.6 — AutoContour Zero-Click Jobs History summary (read-only)
+// 0click 1.7 — AutoContour Zero-Click Jobs History summary (read-only)
 
 (function () {
   'use strict';
   const TAG = '[0click]';
-  const SCRIPT_VERSION = '1.6';
-  const PANEL_TITLE = '0click 1.6';
+  const SCRIPT_VERSION = '1.7';
+  const PANEL_TITLE = '0click 1.7';
   const PANEL_ID = 'zclick-panel';
   const DEBOUNCE_MS = 250;
   const PAGE_SIZE = 500;
@@ -337,7 +337,7 @@
         const st = statusLabel(r && r.status);
         return st ? (base + ' [' + st + ']') : base;
       }).join('\n');
-      return { label: label, title: title, error: true, status: g.st };
+      return { label: label, title: title, error: true, status: g.st, rows: g.items };
     });
   }
   function headerKey(text) {
@@ -963,6 +963,37 @@
     }
     return findDomRowFor(name, unmatched.concat(matched)) || findDomRowFor(name, []);
   }
+  function sameStatus(a, b) {
+    return norm(statusLabel(a)).toLowerCase() === norm(statusLabel(b)).toLowerCase();
+  }
+  function findErrorDomRow(patient, rows) {
+    const name = norm(patient);
+    if (!name) return null;
+    for (const want of rows || []) {
+      for (const item of collectDomJobRows()) {
+        const rec = item && item.rec, el = item && item.el;
+        if (!rec || !el || norm(rec.patient) !== name) continue;
+        if (norm(rec.series) === norm(want && want.series) &&
+            norm(rec.submitted) === norm(want && want.submitted) &&
+            sameStatus(rec.status, want && want.status)) {
+          return el;
+        }
+      }
+    }
+    return null;
+  }
+  function locateErrorSeries(patient, rows) {
+    const row = findErrorDomRow(patient, rows);
+    if (row) {
+      setLocateNote('');
+      highlightDomRow(row, 'error');
+      debug('locate-error', 'ok');
+      return true;
+    }
+    setLocateNote('not on this page');
+    debug('locate-error', 'not-on-page');
+    return false;
+  }
   const FLASH_MS = 2000;
   let flashTimer = null, flashEl = null, flashPrev = null;
   function clearFlash() {
@@ -979,7 +1010,7 @@
     flashEl = null;
     flashPrev = null;
   }
-  function highlightDomRow(rowEl) {
+  function highlightDomRow(rowEl, tone) {
     if (!rowEl) return false;
     clearFlash();
     flashEl = rowEl;
@@ -990,11 +1021,12 @@
       transition: rowEl.style.transition,
       boxShadow: rowEl.style.boxShadow
     };
+    const error = tone === 'error';
     rowEl.style.transition = 'background-color 0.2s, box-shadow 0.2s';
-    rowEl.style.outline = '3px solid #1565c0';
+    rowEl.style.outline = error ? '3px solid #c62828' : '3px solid #1565c0';
     rowEl.style.outlineOffset = '-2px';
-    rowEl.style.backgroundColor = '#fff59d';
-    rowEl.style.boxShadow = '0 0 0 3px rgba(21,101,192,.35)';
+    rowEl.style.backgroundColor = error ? '#ffcdd2' : '#fff59d';
+    rowEl.style.boxShadow = error ? '0 0 0 3px rgba(198,40,40,.45)' : '0 0 0 3px rgba(21,101,192,.35)';
     try { rowEl.scrollIntoView({ block: 'center', behavior: 'smooth' }); }
     catch (e) {
       try { rowEl.scrollIntoView(true); } catch (e2) { /* ignore */ }
@@ -1141,7 +1173,7 @@
     if (text != null && text !== '') node.textContent = text;
     return node;
   }
-  function addLines(td, items, kind) {
+  function addLines(td, items, kind, patient) {
     if (!items.length) {
       td.appendChild(el('span', 'none', '—'));
       return;
@@ -1153,7 +1185,15 @@
       const line = el('div', cls);
       line.appendChild(document.createTextNode(item.label || ''));
       if (item && item.error && item.status) {
-        line.appendChild(el('span', 'status-chip', item.status));
+        const chip = el('button', 'status-chip', item.status);
+        chip.type = 'button';
+        const recs = item.rows || [];
+        chip.addEventListener('click', ev => {
+          ev.preventDefault();
+          ev.stopPropagation();
+          locateErrorSeries(patient, recs);
+        });
+        line.appendChild(chip);
       }
       if (item.title) line.title = item.title;
       wrap.appendChild(line);
@@ -1172,10 +1212,8 @@
     th.colSpan = 4;
     th.textContent =
       daySummary.sectionTitle +
-      ' · ' + daySummary.patientCount + ' patient' + (daySummary.patientCount === 1 ? '' : 's') +
-      ' · ' + daySummary.seriesCount + ' series · ' +
-      daySummary.matchedCount + ' matched · ' +
-      daySummary.unmatchedCount + ' unmatched';
+      ' \u00b7 ' + daySummary.patientCount + ' patient' + (daySummary.patientCount === 1 ? '' : 's') +
+      ' \u00b7 ' + daySummary.matchedCount + ' matched';
     sec.appendChild(th);
     tbody.appendChild(sec);
     for (const g of daySummary.groups) {
@@ -1199,10 +1237,10 @@
       ptd.appendChild(btn);
       tr.appendChild(ptd);
       const utd = el('td', 'unmatched-cell');
-      addLines(utd, consolidateUnmatched(g.unmatched), 'unmatched');
+      addLines(utd, consolidateUnmatched(g.unmatched), 'unmatched', g.patient);
       tr.appendChild(utd);
       const mtd = el('td', 'matched-cell');
-      addLines(mtd, formatMatchedItems(g.matched), 'matched');
+      addLines(mtd, formatMatchedItems(g.matched), 'matched', g.patient);
       tr.appendChild(mtd);
       const all = (g.matched || []).concat(g.unmatched || []);
       const latest = latestSubmittedText(all);
@@ -1348,7 +1386,7 @@
       'table.grid tbody tr.has-error .patient-link, table.grid tbody tr.day-yesterday.has-error .patient-link { color: #b71c1c; }' +
       '.error-count { color: #c62828; font-weight: 800; }' +
       '.cell-line.series-error { color: #b71c1c; font-weight: 700; }' +
-      '.status-chip { display: inline-block; margin-left: 5px; background: #c62828; color: #fff; font-size: 10px; font-weight: 800; line-height: 1.4; padding: 0 5px; border-radius: 3px; vertical-align: middle; letter-spacing: .03em; }' +
+      '.status-chip { display: inline-block; margin-left: 5px; background: #c62828; color: #fff; font-size: 10px; font-weight: 800; line-height: 1.4; padding: 0 5px; border: 0; border-radius: 3px; vertical-align: middle; letter-spacing: .03em; font-family: inherit; cursor: pointer; }' +
       'table.grid tfoot td { position: sticky; bottom: 0; background: #eceff1; font-weight: 700; box-shadow: 0 -1px 0 #cfd8dc; }' +
       'td.patient-cell { font-weight: 600; white-space: nowrap; }' +
       'button.patient-link { background: none; border: 0; padding: 0; font: inherit; font-weight: 600; color: #0d47a1; text-decoration: underline; cursor: pointer; }' +
@@ -1430,6 +1468,7 @@
       collectDomJobRows, findPatientDomRow, locatePatient, highlightDomRow, setLocateNote, FLASH_MS,
       extractPatientId, copyPatientId, writeClipboard, locateNotes,
       isProblemStatus, countErrorSeries, errorSeriesLines, statusLabel,
+      findErrorDomRow, locateErrorSeries, sameStatus,
       setApiRowsForTest: (rows, path) => { apiRows = rows; apiPath = path || '/api/jobs'; apiState = rows ? 'api' : 'idle'; lastJobsUrl = path || lastJobsUrl; },
       norm
     };

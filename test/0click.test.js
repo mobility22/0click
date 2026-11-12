@@ -11,10 +11,10 @@ function check(name, got, expected) {
   console.log((ok ? 'PASS' : 'FAIL') + ' ' + name + ' got ' + JSON.stringify(got) + ' expected ' + JSON.stringify(expected));
 }
 
-check('script @version 1.6', /@version\s+1\.6\b/.test(src), true);
-check('script SCRIPT_VERSION', /const SCRIPT_VERSION = '1\.6'/.test(src), true);
-check('script header comment 0click 1.6', /\/\/ 0click 1\.6\b/.test(src), true);
-check('script PANEL_TITLE', /const PANEL_TITLE = '0click 1\.6'/.test(src), true);
+check('script @version 1.7', /@version\s+1\.7\b/.test(src), true);
+check('script SCRIPT_VERSION', /const SCRIPT_VERSION = '1\.7'/.test(src), true);
+check('script header comment 0click 1.7', /\/\/ 0click 1\.7\b/.test(src), true);
+check('script PANEL_TITLE', /const PANEL_TITLE = '0click 1\.7'/.test(src), true);
 check('script @run-at document-start', /@run-at\s+document-start/.test(src), true);
 check('script @inject-into page', /@inject-into\s+page/.test(src), true);
 check('script @grant GM_setClipboard', /@grant\s+GM_setClipboard/.test(src), true);
@@ -175,7 +175,7 @@ function loadApi(html) {
   check('panel host light DOM has no patient text', light.indexOf(P1) === -1 && light.indexOf(P2) === -1, true);
   const root = api.panelRoot();
   check('panel uses closed shadow root', !!(root && root.mode === 'closed'), true);
-  check('panel title is 0click 1.6', !!(root && root.querySelector('.title') && root.querySelector('.title').textContent === '0click 1.6'), true);
+  check('panel title is 0click 1.7', !!(root && root.querySelector('.title') && root.querySelector('.title').textContent === '0click 1.7'), true);
   check('panel has refresh button', !!(root && root.querySelector('.refresh')), true);
   check('panel header has no date-range subtitle', !!(root && !root.querySelector('.range')), true);
   check('panel header has no source line', !!(root && !root.querySelector('.source')), true);
@@ -245,8 +245,9 @@ function loadApi(html) {
 
   const todayHead = grid && grid.querySelector('tr.section-today th');
   const yestHead = grid && grid.querySelector('tr.section-yesterday th');
-  check('today section header comes first and includes date', !!(todayHead && todayHead.textContent.indexOf('TODAY (2026-11-12)') === 0 && todayHead.textContent.indexOf('patient') !== -1), true);
-  check('yesterday section header includes date', !!(yestHead && yestHead.textContent.indexOf('YESTERDAY (2026-11-11)') === 0), true);
+  check('today section header has date, patients, and matched', (todayHead && todayHead.textContent.trim()) || '', 'TODAY (2026-11-12) \u00b7 2 patients \u00b7 2 matched');
+  check('yesterday section header has date, patients, and matched', (yestHead && yestHead.textContent.trim()) || '', 'YESTERDAY (2026-11-11) \u00b7 2 patients \u00b7 0 matched');
+  check('section headers omit series and unmatched counts', !!(todayHead && yestHead && todayHead.textContent.indexOf('series') === -1 && todayHead.textContent.indexOf('unmatched') === -1 && yestHead.textContent.indexOf('series') === -1 && yestHead.textContent.indexOf('unmatched') === -1), true);
   const todayRows = grid ? [...grid.querySelectorAll('tr.day-today')] : [];
   const yestRows = grid ? [...grid.querySelectorAll('tr.day-yesterday')] : [];
   check('today has one row per patient', todayRows.length, 2);
@@ -364,7 +365,7 @@ function loadApi(html) {
     '<tr><td>Cancelled</td><td>Thorax</td><td>' + P_ERR + '</td><td>KP_ROS</td><td>CT ABDOMEN</td><td>2026-11-11 09:00:00</td></tr>' +
     '<tr><td>Timeout</td><td>-</td><td>' + P_ONLY + '</td><td>KP_ROS</td><td>CT TO</td><td>2026-11-11 08:00:00</td></tr>' +
     '</tbody></table>';
-  const { api } = loadApi(html);
+  const { api, window } = loadApi(html);
   const summary = api.groupByPatient(api.extractRows(), NOW);
   check('error fixture counts four problem series', summary.errorCount, 4);
   check('Transferred is excluded from the error count', summary.seriesCount, 6);
@@ -401,6 +402,43 @@ function loadApi(html) {
   check('error line stays red and includes the series label', !!(errLine && errLine.classList.contains('series-error') && /CT HEAD/.test(errLine.textContent) && /Error/.test(errLine.textContent)), true);
   const transferred = errToday ? errToday.textContent : '';
   check('transferred series is listed without an error chip', transferred.indexOf('CT OTHER') !== -1 && ![...errToday.querySelectorAll('.status-chip')].some(c => /Transferred/i.test(c.textContent)), true);
+
+  const pageDoc = window.document;
+  pageDoc.querySelectorAll('#errs tbody tr').forEach((row, i) => {
+    row.id = 'err-page-' + i;
+    row.addEventListener('click', () => { window.__zclickPageClicks.push(row.id); });
+  });
+  const errorPageRow = pageDoc.querySelector('#err-page-0');
+  const cancelledPageRow = pageDoc.querySelector('#err-page-4');
+  let panelRowClicks = 0;
+  let patientClicks = 0;
+  errToday.addEventListener('click', () => { panelRowClicks += 1; });
+  const patientBtn = errToday.querySelector('button.patient-link');
+  if (patientBtn) patientBtn.addEventListener('click', () => { patientClicks += 1; });
+  const errorChip = errToday.querySelector('.status-chip');
+  check('error chip is a button', !!(errorChip && errorChip.tagName === 'BUTTON'), true);
+  window.__zclickScrolls = [];
+  window.__zclickPageClicks = [];
+  if (errorChip) errorChip.click();
+  check('error chip scrolls to the exact Error series row', window.__zclickScrolls[0] && window.__zclickScrolls[0].id, errorPageRow && errorPageRow.id);
+  check('error chip locate uses block center', !!(window.__zclickScrolls[0] && window.__zclickScrolls[0].opts && window.__zclickScrolls[0].opts.block === 'center'), true);
+  const errOutline = errorPageRow ? String(errorPageRow.style.outline || '') : '';
+  const errBg = errorPageRow ? String(errorPageRow.style.backgroundColor || '') : '';
+  check('error chip highlight is red', /3px/.test(errOutline) && (errOutline.indexOf('c62828') !== -1 || /rgb\( *198, *40, *40 *\)/.test(errOutline) || errBg.indexOf('ffcdd2') !== -1 || /rgb\( *255, *205, *210 *\)/.test(errBg)), true);
+  check('error chip does not use the patient-locate highlight', errOutline.indexOf('1565c0') === -1 && !/rgb\( *21, *101, *192 *\)/.test(errOutline), true);
+  check('error chip does not click the page row', window.__zclickPageClicks.length, 0);
+  check('error chip click does not bubble to the patient name', patientClicks, 0);
+  check('error chip click is stopped on the chip', panelRowClicks, 0);
+  check('error chip locate note is cleared when found', (root.querySelector('.locate-note') || {}).textContent || '', '');
+
+  window.__zclickScrolls = [];
+  const cancelledChip = errYest && errYest.querySelector('.status-chip');
+  if (cancelledChip) cancelledChip.click();
+  check('cancelled chip scrolls to the matched Cancelled series row', window.__zclickScrolls[0] && window.__zclickScrolls[0].id, cancelledPageRow && cancelledPageRow.id);
+
+  const missingOk = api.locateErrorSeries('BROWN, PAT (222222)', [{ series: 'CT OTHER', submitted: '2026-11-12 10:00:00', status: 'Error' }]);
+  check('missing error row returns false', missingOk, false);
+  check('missing error row shows not-on-page note', (root.querySelector('.locate-note') || {}).textContent, 'not on this page');
 }
 
 {
