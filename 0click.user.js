@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         0click
 // @namespace    https://github.com/mobility22/0click
-// @version      1.7
+// @version      1.8
 // @description  Read-only AutoContour Zero-Click Jobs History summary
 // @match        http://10.240.61.81:18001/*
 // @updateURL    https://raw.githubusercontent.com/mobility22/0click/refs/heads/main/0click.user.js
@@ -12,13 +12,13 @@
 // @inject-into  page
 // ==/UserScript==
 
-// 0click 1.7 — AutoContour Zero-Click Jobs History summary (read-only)
+// 0click 1.8 — AutoContour Zero-Click Jobs History summary (read-only)
 
 (function () {
   'use strict';
   const TAG = '[0click]';
-  const SCRIPT_VERSION = '1.7';
-  const PANEL_TITLE = '0click 1.7';
+  const SCRIPT_VERSION = '1.8';
+  const PANEL_TITLE = '0click 1.8';
   const PANEL_ID = 'zclick-panel';
   const DEBOUNCE_MS = 250;
   const PAGE_SIZE = 500;
@@ -1205,21 +1205,14 @@
     if (info.source === 'api') return 'Source: GET ' + (info.path || '/');
     return 'Source: visible table (API not detected; may be limited by page filters or pagination)';
   }
-  function appendPatientRows(tbody, daySummary) {
+  function appendPatientRows(tbody, daySummary, splitFirst) {
     const day = daySummary.day;
-    const sec = el('tr', 'section section-' + day);
-    const th = el('th', 'section-head');
-    th.colSpan = 4;
-    th.textContent =
-      daySummary.sectionTitle +
-      ' \u00b7 ' + daySummary.patientCount + ' patient' + (daySummary.patientCount === 1 ? '' : 's') +
-      ' \u00b7 ' + daySummary.matchedCount + ' matched';
-    sec.appendChild(th);
-    tbody.appendChild(sec);
+    let first = true;
     for (const g of daySummary.groups) {
       const alert = g.unmatchedCount > 0 && g.matchedCount === 0;
       const hasError = (g.errorCount || 0) > 0;
-      const tr = el('tr', 'day-' + day + (alert ? ' alert' : '') + (hasError ? ' has-error' : ''));
+      const tr = el('tr', 'day-' + day + (alert ? ' alert' : '') + (hasError ? ' has-error' : '') + (splitFirst && first ? ' day-split' : ''));
+      first = false;
       const ptd = el('td', 'patient-cell');
       if (alert) {
         const mark = el('span', 'alert-mark', '!');
@@ -1270,7 +1263,7 @@
     table.appendChild(thead);
     const tbody = el('tbody');
     appendPatientRows(tbody, today);
-    appendPatientRows(tbody, yesterday);
+    appendPatientRows(tbody, yesterday, today.groups.length > 0 && yesterday.groups.length > 0);
     table.appendChild(tbody);
     const tfoot = el('tfoot');
     const fr = el('tr');
@@ -1373,9 +1366,8 @@
       'table.grid { width: 100%; border-collapse: collapse; table-layout: auto; }' +
       'table.grid th, table.grid td { border: 1px solid #c5d4e8; padding: 5px 7px; vertical-align: top; text-align: left; }' +
       'table.grid thead th { position: sticky; top: 0; background: #1565c0; color: #fff; z-index: 1; font-weight: 700; box-shadow: 0 1px 0 #0d47a1; }' +
-      'table.grid tbody tr.section-today th { position: sticky; top: 24px; background: #1565c0; color: #fff; font-weight: 800; letter-spacing: .03em; box-shadow: 0 1px 0 #0d47a1; }' +
-      'table.grid tbody tr.section-yesterday th { position: sticky; top: 24px; background: #546e7a; color: #fff; font-weight: 800; letter-spacing: .03em; box-shadow: 0 1px 0 #37474f; }' +
       'table.grid tbody tr.day-today td { background: #e3f2fd; border-left: 4px solid #1976d2; }' +
+      'table.grid tbody tr.day-yesterday.day-split td { border-top: 2px solid #90a4ae; }' +
       'table.grid tbody tr.day-yesterday td { background: #eceff1; color: #546e7a; border-left: 4px solid #90a4ae; }' +
       'table.grid tbody tr.day-yesterday .patient-link { color: #37474f; }' +
       'table.grid tbody tr.alert td { background: #ffe0b2; border-left: 5px solid #e65100; color: #4e342e; }' +

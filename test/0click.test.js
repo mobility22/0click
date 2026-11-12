@@ -11,10 +11,10 @@ function check(name, got, expected) {
   console.log((ok ? 'PASS' : 'FAIL') + ' ' + name + ' got ' + JSON.stringify(got) + ' expected ' + JSON.stringify(expected));
 }
 
-check('script @version 1.7', /@version\s+1\.7\b/.test(src), true);
-check('script SCRIPT_VERSION', /const SCRIPT_VERSION = '1\.7'/.test(src), true);
-check('script header comment 0click 1.7', /\/\/ 0click 1\.7\b/.test(src), true);
-check('script PANEL_TITLE', /const PANEL_TITLE = '0click 1\.7'/.test(src), true);
+check('script @version 1.8', /@version\s+1\.8\b/.test(src), true);
+check('script SCRIPT_VERSION', /const SCRIPT_VERSION = '1\.8'/.test(src), true);
+check('script header comment 0click 1.8', /\/\/ 0click 1\.8\b/.test(src), true);
+check('script PANEL_TITLE', /const PANEL_TITLE = '0click 1\.8'/.test(src), true);
 check('script @run-at document-start', /@run-at\s+document-start/.test(src), true);
 check('script @inject-into page', /@inject-into\s+page/.test(src), true);
 check('script @grant GM_setClipboard', /@grant\s+GM_setClipboard/.test(src), true);
@@ -175,7 +175,7 @@ function loadApi(html) {
   check('panel host light DOM has no patient text', light.indexOf(P1) === -1 && light.indexOf(P2) === -1, true);
   const root = api.panelRoot();
   check('panel uses closed shadow root', !!(root && root.mode === 'closed'), true);
-  check('panel title is 0click 1.7', !!(root && root.querySelector('.title') && root.querySelector('.title').textContent === '0click 1.7'), true);
+  check('panel title is 0click 1.8', !!(root && root.querySelector('.title') && root.querySelector('.title').textContent === '0click 1.8'), true);
   check('panel has refresh button', !!(root && root.querySelector('.refresh')), true);
   check('panel header has no date-range subtitle', !!(root && !root.querySelector('.range')), true);
   check('panel header has no source line', !!(root && !root.querySelector('.source')), true);
@@ -243,13 +243,15 @@ function loadApi(html) {
   check('matched 4D and tokens stay within 3 lines', matchedMany.length <= 3, true);
   check('matched 4D line includes template', /Thorax ← 4D phases ×2 \(T 0[,–]90%\)/.test(matchedMany[0].label) || matchedMany[0].label.indexOf('Thorax ← 4D phases ×2') !== -1, true);
 
-  const todayHead = grid && grid.querySelector('tr.section-today th');
-  const yestHead = grid && grid.querySelector('tr.section-yesterday th');
-  check('today section header has date, patients, and matched', (todayHead && todayHead.textContent.trim()) || '', 'TODAY (2026-11-12) \u00b7 2 patients \u00b7 2 matched');
-  check('yesterday section header has date, patients, and matched', (yestHead && yestHead.textContent.trim()) || '', 'YESTERDAY (2026-11-11) \u00b7 2 patients \u00b7 0 matched');
-  check('section headers omit series and unmatched counts', !!(todayHead && yestHead && todayHead.textContent.indexOf('series') === -1 && todayHead.textContent.indexOf('unmatched') === -1 && yestHead.textContent.indexOf('series') === -1 && yestHead.textContent.indexOf('unmatched') === -1), true);
+  const todayHead = grid && grid.querySelector('tr.section-today, tr.section-yesterday, th.section-head');
+  check('section header rows are removed', !todayHead, true);
+  const tbodyText = grid && grid.querySelector('tbody') ? grid.querySelector('tbody').textContent : '';
+  check('table body has no TODAY/YESTERDAY header text', !!(tbodyText && tbodyText.indexOf('TODAY') === -1 && tbodyText.indexOf('YESTERDAY') === -1), true);
   const todayRows = grid ? [...grid.querySelectorAll('tr.day-today')] : [];
   const yestRows = grid ? [...grid.querySelectorAll('tr.day-yesterday')] : [];
+  const dayRows = grid ? [...grid.querySelectorAll('tbody tr.day-today, tbody tr.day-yesterday')] : [];
+  check('today rows are listed before yesterday rows', !!(dayRows.length === 4 && dayRows[0].classList.contains('day-today') && dayRows[1].classList.contains('day-today') && dayRows[2].classList.contains('day-yesterday') && dayRows[3].classList.contains('day-yesterday')), true);
+  check('optional divider is on the first yesterday row only', !!(yestRows[0] && yestRows[0].classList.contains('day-split') && !yestRows[1].classList.contains('day-split') && todayRows.every(r => !r.classList.contains('day-split'))), true);
   check('today has one row per patient', todayRows.length, 2);
   check('yesterday has one row per patient', yestRows.length, 2);
   check('patient with jobs on both days appears in both sections', todayRows.filter(r => r.textContent.indexOf(P1) !== -1).length === 1 && yestRows.filter(r => r.textContent.indexOf(P1) !== -1).length === 1, true);
