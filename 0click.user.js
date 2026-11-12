@@ -1,23 +1,24 @@
 // ==UserScript==
 // @name         0click
 // @namespace    https://github.com/mobility22/0click
-// @version      1.4
+// @version      1.5
 // @description  Read-only AutoContour Zero-Click Jobs History summary
 // @match        http://10.240.61.81:18001/*
 // @updateURL    https://raw.githubusercontent.com/mobility22/0click/refs/heads/main/0click.user.js
 // @downloadURL  https://raw.githubusercontent.com/mobility22/0click/refs/heads/main/0click.user.js
 // @run-at       document-start
 // @grant        unsafeWindow
+// @grant        GM_setClipboard
 // @inject-into  page
 // ==/UserScript==
 
-// 0click 1.4 — AutoContour Zero-Click Jobs History summary (read-only)
+// 0click 1.5 — AutoContour Zero-Click Jobs History summary (read-only)
 
 (function () {
   'use strict';
   const TAG = '[0click]';
-  const SCRIPT_VERSION = '1.4';
-  const PANEL_TITLE = '0click 1.4';
+  const SCRIPT_VERSION = '1.5';
+  const PANEL_TITLE = '0click 1.5';
   const PANEL_ID = 'zclick-panel';
   const DEBOUNCE_MS = 250;
   const PAGE_SIZE = 500;
@@ -220,10 +221,12 @@
     return lines.map(line => ({ label: line.label, title: line.title || fullTitle }));
   }
   function consolidateUnmatched(items) {
-    return consolidateSeriesLines(items, false);
+    const ok = (items || []).filter(r => !isProblemStatus(r && r.status));
+    return errorSeriesLines(items, false).concat(consolidateSeriesLines(ok, false));
   }
   function formatMatchedItems(items) {
-    return consolidateSeriesLines(items, true);
+    const ok = (items || []).filter(r => !isProblemStatus(r && r.status));
+    return errorSeriesLines(items, true).concat(consolidateSeriesLines(ok, true));
   }
   function dayKind(text, now) {
     const d = parseSubmittedDate(text);
@@ -287,6 +290,55 @@
   function isMatchedTemplate(text) {
     const t = norm(text);
     return t !== '' && t !== '-';
+  }
+  function statusLabel(text) {
+    return String(text == null ? '' : text).trim();
+  }
+  // Problem statuses: Error/Failed/Cancelled/Timeout (case-insensitive),
+  // or any status containing "error"/"fail". "Completed" and "Transferred" are not errors.
+  function isProblemStatus(status) {
+    const t = statusLabel(status);
+    if (!t) return false;
+    const low = t.toLowerCase();
+    if (low === 'completed') return false;
+    if (low.indexOf('error') !== -1 || low.indexOf('fail') !== -1) return true;
+    if (/^(cancelled|canceled|timeout|timed[\s-]*out)$/i.test(t)) return true;
+    return false;
+  }
+  function countErrorSeries(items) {
+    let n = 0;
+    for (const r of items || []) {
+      if (isProblemStatus(r && r.status)) n += 1;
+    }
+    return n;
+  }
+  function errorSeriesLines(items, withTemplate) {
+    const errors = (items || []).filter(r => isProblemStatus(r && r.status));
+    const order = [];
+    const map = new Map();
+    for (const r of errors) {
+      const short = shortSeriesLabel(r && r.series) || '(no series description)';
+      const tmpl = withTemplate ? templatePrefix([r && r.template]) : '';
+      const st = statusLabel(r && r.status);
+      const key = tmpl + '\0' + short + '\0' + st.toLowerCase();
+      if (!map.has(key)) {
+        map.set(key, { tmpl: tmpl, short: short, st: st, items: [] });
+        order.push(key);
+      }
+      map.get(key).items.push(r);
+    }
+    return order.map(key => {
+      const g = map.get(key);
+      const label = g.tmpl + g.short + (g.items.length > 1 ? ' \u00d7' + g.items.length : '');
+      const title = g.items.map(r => {
+        const full = norm(r && r.series) || '(no series description)';
+        const t = withTemplate ? norm(r && r.template) : '';
+        const base = t ? (t + ' \u2190 ' + full) : full;
+        const st = statusLabel(r && r.status);
+        return st ? (base + ' [' + st + ']') : base;
+      }).join('\n');
+      return { label: label, title: title, error: true, status: g.st };
+    });
   }
   function headerKey(text) {
     const t = norm(text);
@@ -957,18 +1009,72 @@
     const msg = text ? String(text) : '';
     note.textContent = msg;
     note.style.display = msg ? 'block' : 'none';
+    note.classList.toggle('ok', msg === 'ID copied');
+  }
+  // Patient cell form: "LAST, FIRST (ID)". Use the last parentheses only.
+  // Allowed ID characters: alphanumerics plus $ - _. Never log or store the ID.
+  function extractPatientId(patient) {
+    const text = patient == null ? '' : String(patient);
+    const open = text.lastIndexOf('(');
+    const close = text.lastIndexOf(')');
+    if (open < 0 || close <= open) return '';
+    const id = text.slice(open + 1, close).trim();
+    if (!id || !/^[A-Za-z0-9$_-]+$/.test(id)) return '';
+    return id;
+  }
+  function tryGmSetClipboard(text) {
+    try {
+      if (typeof GM_setClipboard === 'function') {
+        GM_setClipboard(text, 'text');
+        return true;
+      }
+    } catch (e) { /* fall through */ }
+    return false;
+  }
+  function writeClipboard(text) {
+    if (tryGmSetClipboard(text)) return Promise.resolve(true);
+    try {
+      const clip = (typeof navigator !== 'undefined' && navigator.clipboard) ? navigator.clipboard : null;
+      if (clip && typeof clip.writeText === 'function') {
+        return Promise.resolve(clip.writeText(text)).then(function () { return true; }).catch(function () { return false; });
+      }
+    } catch (e) { /* ignore */ }
+    return Promise.resolve(false);
+  }
+  function copyPatientId(patient) {
+    const id = extractPatientId(patient);
+    if (!id) return Promise.resolve('missing');
+    return writeClipboard(id).then(function (ok) { return ok ? 'copied' : 'failed'; });
+  }
+  function locateNotes(copyStatus, found) {
+    const parts = [];
+    if (copyStatus === 'copied') parts.push('ID copied');
+    else if (copyStatus === 'missing') parts.push('ID not found');
+    if (!found) parts.push('not on this page');
+    return parts.join('. ');
   }
   function locatePatient(group) {
     const row = findPatientDomRow(group);
     if (row) {
-      setLocateNote('');
       highlightDomRow(row);
       debug('locate', 'ok');
-      return true;
+    } else {
+      debug('locate', 'not-on-page');
     }
-    setLocateNote('not on this page');
-    debug('locate', 'not-on-page');
-    return false;
+    const id = extractPatientId(group && group.patient);
+    if (!id) {
+      setLocateNote(locateNotes('missing', !!row));
+      return !!row;
+    }
+    // Prefer GM_setClipboard so the note can update immediately. The ID is not kept or logged.
+    if (tryGmSetClipboard(id)) {
+      setLocateNote(locateNotes('copied', !!row));
+      return !!row;
+    }
+    writeClipboard(id).then(function (ok) {
+      setLocateNote(locateNotes(ok ? 'copied' : 'failed', !!row));
+    });
+    return !!row;
   }
   function getRowsAndSource() {
     if (apiRows) return { rows: apiRows, source: 'api', path: apiPath, state: apiState };
@@ -999,7 +1105,8 @@
         unmatched: g.unmatched,
         total: g.matched.length + g.unmatched.length,
         matchedCount: g.matched.length,
-        unmatchedCount: g.unmatched.length
+        unmatchedCount: g.unmatched.length,
+        errorCount: countErrorSeries(g.matched.concat(g.unmatched))
       };
     });
     return {
@@ -1008,6 +1115,7 @@
       seriesCount: ros.length,
       matchedCount: groups.reduce((n, g) => n + g.matchedCount, 0),
       unmatchedCount: groups.reduce((n, g) => n + g.unmatchedCount, 0),
+      errorCount: countErrorSeries(ros),
       tableCount: findJobContainers().length,
       rangeLabel: range.label,
       skippedCount: rosAll.length - ros.length
@@ -1041,7 +1149,12 @@
     const wrap = el('div', 'cell-lines');
     wrap.title = items.map(item => item.title).filter(Boolean).join('\n') || items.map(item => item.label).join('\n');
     for (const item of items) {
-      const line = el('div', 'cell-line ' + kind, item.label);
+      const cls = 'cell-line ' + kind + (item && item.error ? ' series-error' : '');
+      const line = el('div', cls);
+      line.appendChild(document.createTextNode(item.label || ''));
+      if (item && item.error && item.status) {
+        line.appendChild(el('span', 'status-chip', item.status));
+      }
       if (item.title) line.title = item.title;
       wrap.appendChild(line);
     }
@@ -1067,7 +1180,8 @@
     tbody.appendChild(sec);
     for (const g of daySummary.groups) {
       const alert = g.unmatchedCount > 0 && g.matchedCount === 0;
-      const tr = el('tr', 'day-' + day + (alert ? ' alert' : ''));
+      const hasError = (g.errorCount || 0) > 0;
+      const tr = el('tr', 'day-' + day + (alert ? ' alert' : '') + (hasError ? ' has-error' : ''));
       const ptd = el('td', 'patient-cell');
       if (alert) {
         const mark = el('span', 'alert-mark', '!');
@@ -1142,11 +1256,17 @@
     drainBuf();
     const info = getRowsAndSource();
     const summary = groupByPatient(info.rows);
-    totalsEl.textContent =
+    clearNode(totalsEl);
+    totalsEl.appendChild(document.createTextNode(
       summary.patientCount + ' patient' + (summary.patientCount === 1 ? '' : 's') +
       ' · ' + summary.seriesCount + ' series · ' +
       summary.matchedCount + ' matched · ' +
-      summary.unmatchedCount + ' unmatched';
+      summary.unmatchedCount + ' unmatched'
+    ));
+    if (summary.errorCount > 0) {
+      totalsEl.appendChild(document.createTextNode(' · '));
+      totalsEl.appendChild(el('span', 'error-count', summary.errorCount + ' error' + (summary.errorCount === 1 ? '' : 's')));
+    }
     totalsEl.title = sourceLabel(info);
     if (info.state === 'loading' && info.source !== 'api') {
       body.appendChild(el('div', 'empty', 'Loading the last two days from the jobs API…'));
@@ -1222,7 +1342,15 @@
       'table.grid tbody tr.day-today td { background: #e3f2fd; border-left: 4px solid #1976d2; }' +
       'table.grid tbody tr.day-yesterday td { background: #eceff1; color: #546e7a; border-left: 4px solid #90a4ae; }' +
       'table.grid tbody tr.day-yesterday .patient-link { color: #37474f; }' +
-      'table.grid tbody tr.alert td.patient-cell { box-shadow: inset 3px 0 0 #ef6c00; }' +
+      'table.grid tbody tr.alert td { background: #ffe0b2; border-left: 5px solid #e65100; color: #4e342e; }' +
+      'table.grid tbody tr.day-today.alert td, table.grid tbody tr.day-yesterday.alert td { background: #ffe0b2; border-left: 5px solid #e65100; color: #4e342e; }' +
+      'table.grid tbody tr.alert .patient-link, table.grid tbody tr.day-yesterday.alert .patient-link { color: #bf360c; }' +
+      'table.grid tbody tr.has-error td { background: #ffcdd2; border-left: 5px solid #c62828; box-shadow: inset 0 0 0 1px #c62828; color: #b71c1c; }' +
+      'table.grid tbody tr.day-today.has-error td, table.grid tbody tr.day-yesterday.has-error td, table.grid tbody tr.alert.has-error td { background: #ffcdd2; border-left: 5px solid #c62828; box-shadow: inset 0 0 0 1px #c62828; color: #b71c1c; }' +
+      'table.grid tbody tr.has-error .patient-link, table.grid tbody tr.day-yesterday.has-error .patient-link { color: #b71c1c; }' +
+      '.error-count { color: #c62828; font-weight: 800; }' +
+      '.cell-line.series-error { color: #b71c1c; font-weight: 700; }' +
+      '.status-chip { display: inline-block; margin-left: 5px; background: #c62828; color: #fff; font-size: 10px; font-weight: 800; line-height: 1.4; padding: 0 5px; border-radius: 3px; vertical-align: middle; letter-spacing: .03em; }' +
       'table.grid tfoot td { position: sticky; bottom: 0; background: #eceff1; font-weight: 700; box-shadow: 0 -1px 0 #cfd8dc; }' +
       'td.patient-cell { font-weight: 600; white-space: nowrap; }' +
       'button.patient-link { background: none; border: 0; padding: 0; font: inherit; font-weight: 600; color: #0d47a1; text-decoration: underline; cursor: pointer; }' +
@@ -1232,6 +1360,7 @@
       '.badge.yest { background: #78909c; color: #fff; }' +
       '.alert-mark { display: inline-block; margin-right: 4px; background: #ef6c00; color: #fff; font-weight: 800; font-size: 10px; line-height: 1.4; padding: 0 5px; border-radius: 3px; vertical-align: middle; }' +
       '.locate-note { display: none; padding: 4px 10px; font-size: 11px; color: #b71c1c; flex: 0 0 auto; }' +
+      '.locate-note.ok { color: #1565c0; }' +
       '.cell-lines { display: flex; flex-direction: column; gap: 1px; }' +
       '.cell-line { font-size: 11px; line-height: 1.35; }' +
       '.cell-line.unmatched { }' +
@@ -1304,6 +1433,8 @@
       parsePhasePercent, firstSeriesToken, compactPhaseList, phaseLineLabel, consolidateSeriesLines,
       dayKind, summarizeDay, rowsForDay, MAX_CELL_LINES,
       collectDomJobRows, findPatientDomRow, locatePatient, highlightDomRow, setLocateNote, FLASH_MS,
+      extractPatientId, copyPatientId, writeClipboard, locateNotes,
+      isProblemStatus, countErrorSeries, errorSeriesLines, statusLabel,
       setApiRowsForTest: (rows, path) => { apiRows = rows; apiPath = path || '/api/jobs'; apiState = rows ? 'api' : 'idle'; lastJobsUrl = path || lastJobsUrl; },
       norm
     };

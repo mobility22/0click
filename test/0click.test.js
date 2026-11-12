@@ -11,12 +11,14 @@ function check(name, got, expected) {
   console.log((ok ? 'PASS' : 'FAIL') + ' ' + name + ' got ' + JSON.stringify(got) + ' expected ' + JSON.stringify(expected));
 }
 
-check('script @version 1.4', /@version\s+1\.4\b/.test(src), true);
-check('script SCRIPT_VERSION', /const SCRIPT_VERSION = '1\.4'/.test(src), true);
-check('script header comment 0click 1.4', /\/\/ 0click 1\.4\b/.test(src), true);
-check('script PANEL_TITLE', /const PANEL_TITLE = '0click 1\.4'/.test(src), true);
+check('script @version 1.5', /@version\s+1\.5\b/.test(src), true);
+check('script SCRIPT_VERSION', /const SCRIPT_VERSION = '1\.5'/.test(src), true);
+check('script header comment 0click 1.5', /\/\/ 0click 1\.5\b/.test(src), true);
+check('script PANEL_TITLE', /const PANEL_TITLE = '0click 1\.5'/.test(src), true);
 check('script @run-at document-start', /@run-at\s+document-start/.test(src), true);
 check('script @inject-into page', /@inject-into\s+page/.test(src), true);
+check('script @grant GM_setClipboard', /@grant\s+GM_setClipboard/.test(src), true);
+check('script keeps @grant unsafeWindow', /@grant\s+unsafeWindow/.test(src), true);
 check('script closed shadow', src.includes("attachShadow({ mode: 'closed' })"), true);
 check('script @downloadURL raw main', src.includes('https://raw.githubusercontent.com/mobility22/0click/refs/heads/main/0click.user.js'), true);
 check('script @match Zero-Click host', src.includes('@match        http://10.240.61.81:18001/*'), true);
@@ -34,7 +36,7 @@ check('README has no ROS', /ROS/.test(readme), false);
 
 
 function loadJsdom() {
-  const tries = ['jsdom', '/tmp/jsdom-root/node_modules/jsdom', path.join(__dirname, '../node_modules/jsdom')];
+  const tries = ['jsdom', '/tmp/jsdom-root/node_modules/jsdom', '/tmp/0click-test-deps/node_modules/jsdom', path.join(__dirname, '../node_modules/jsdom')];
   for (const p of tries) {
     try { return require(p); } catch (e) { /* next */ }
   }
@@ -91,6 +93,10 @@ function loadApi(html) {
       window.ZEROCLICK_TEST = true;
       window.__zclickScrolls = [];
       window.__zclickPageClicks = [];
+      window.__zclickClipboard = [];
+      window.GM_setClipboard = function (data) {
+        window.__zclickClipboard.push({ via: 'gm', data: String(data == null ? '' : data) });
+      };
       const proto = window.HTMLElement.prototype;
       proto.scrollIntoView = function (opts) {
         window.__zclickScrolls.push({ id: this.id || '', opts: opts || null });
@@ -110,11 +116,28 @@ function loadApi(html) {
 {
   const { api, window } = loadApi(jobsTableHtml());
   check('isRosWorkflow KP_ROS', api.isRosWorkflow('KP_ROS'), true);
+  check('extract ID from LAST, FIRST (ID)', api.extractPatientId('DOE, JANE (000000)'), '000000');
+  check('extract ID uses last parentheses', api.extractPatientId('DOE (NICK), JANE (AB-12_3$)'), 'AB-12_3$');
+  check('extract ID trims inside parens', api.extractPatientId('DOE, JANE (  FAKE-1_2$  )'), 'FAKE-1_2$');
+  check('extract ID rejects missing parens', api.extractPatientId('DOE, JANE'), '');
+  check('extract ID rejects invalid characters', api.extractPatientId('DOE, JANE (00 00!)'), '');
+  check('extract ID rejects empty parens', api.extractPatientId('DOE, JANE (   )'), '');
+
   check('isRosWorkflow other', api.isRosWorkflow('Other_Workflow'), false);
   check('isMatchedTemplate name', api.isMatchedTemplate('Head and Neck'), true);
   check('isMatchedTemplate dash', api.isMatchedTemplate('-'), false);
   check('isMatchedTemplate empty', api.isMatchedTemplate(''), false);
   check('isMatchedTemplate whitespace', api.isMatchedTemplate('   '), false);
+  check('Completed is not a problem status', api.isProblemStatus('Completed'), false);
+  check('Transferred is not a problem status', api.isProblemStatus('Transferred'), false);
+  check('empty status is not a problem', api.isProblemStatus(''), false);
+  check('Error is a problem status', api.isProblemStatus('Error'), true);
+  check('Failed is a problem status', api.isProblemStatus('failed'), true);
+  check('Cancelled is a problem status', api.isProblemStatus('Cancelled'), true);
+  check('Timeout is a problem status', api.isProblemStatus('Timeout'), true);
+  check('status containing fail is a problem', api.isProblemStatus('Job Failed'), true);
+  check('status containing error is a problem', api.isProblemStatus('ERROR: timeout'), true);
+
   check('headerKey by text', api.headerKey('Series Description'), 'series');
   check('parse 2026-11-12 13:51:51', api.formatLocalDate(api.parseSubmittedDate('2026-11-12 13:51:51')), '2026-11-12');
   check('today included', api.isWithinLastTwoLocalDays('2026-11-12 13:51:51', NOW), true);
@@ -152,13 +175,14 @@ function loadApi(html) {
   check('panel host light DOM has no patient text', light.indexOf(P1) === -1 && light.indexOf(P2) === -1, true);
   const root = api.panelRoot();
   check('panel uses closed shadow root', !!(root && root.mode === 'closed'), true);
-  check('panel title is 0click 1.4', !!(root && root.querySelector('.title') && root.querySelector('.title').textContent === '0click 1.4'), true);
+  check('panel title is 0click 1.5', !!(root && root.querySelector('.title') && root.querySelector('.title').textContent === '0click 1.5'), true);
   check('panel has refresh button', !!(root && root.querySelector('.refresh')), true);
   check('panel header has no date-range subtitle', !!(root && !root.querySelector('.range')), true);
   check('panel header has no source line', !!(root && !root.querySelector('.source')), true);
   check('panel header has no long note', !!(root && !root.querySelector('.note')), true);
   const totalsText = root && root.querySelector('.totals') ? root.querySelector('.totals').textContent : '';
   check('panel keeps the stats line', /\d+ patients? \u00b7 \d+ series \u00b7 \d+ matched \u00b7 \d+ unmatched/.test(totalsText), true);
+  check('default stats line has no error count', totalsText.indexOf('error') === -1 && !root.querySelector('.error-count'), true);
   const bodyText = root && root.querySelector('.body') ? root.querySelector('.body').textContent : '';
   check('panel lists first patient in shadow only', bodyText.indexOf(P1) !== -1, true);
   const grid = root && root.querySelector('table.grid');
@@ -240,6 +264,9 @@ function loadApi(html) {
   check('P1 last submitted has Today badge and time', todayTime.indexOf('Today') !== -1 && todayTime.indexOf('13:51:51') !== -1, true);
   check('today rows are not unmatched-only', !!(p1Today && p2Today && !p1Today.classList.contains('alert') && !p2Today.classList.contains('alert')), true);
   check('yesterday unmatched-only rows use alert marker', !!(p1Yest && p1Yest.classList.contains('alert') && p1Yest.querySelector('.alert-mark')), true);
+  const panelCss = (root.querySelector('style') || {}).textContent || '';
+  check('alert CSS uses whole-row amber tint and orange border', panelCss.indexOf('#ffe0b2') !== -1 && panelCss.indexOf('#e65100') !== -1 && /tr\.alert td/.test(panelCss), true);
+  check('default yesterday unmatched-only is not an error row', !!(p1Yest && !p1Yest.classList.contains('has-error')), true);
   check('today row uses day-today class', !!(p1Today && p1Today.classList.contains('day-today')), true);
   check('yesterday row uses day-yesterday class', !!(p1Yest && p1Yest.classList.contains('day-yesterday')), true);
   const foot = grid ? [...grid.querySelectorAll('tfoot td')].map(td => td.textContent) : [];
@@ -264,7 +291,11 @@ function loadApi(html) {
   const bg = matchedJob ? String(matchedJob.style.backgroundColor || '') : '';
   check('located row is highlighted', /3px/.test(outline) && (outline.indexOf('1565c0') !== -1 || /rgb\( *21, *101, *192 *\)/.test(outline) || /rgb\( *255, *245, *157 *\)/.test(bg) || bg.indexOf('fff59d') !== -1 || bg.length > 0), true);
   check('locate does not click the page row', window.__zclickPageClicks.length, 0);
-  check('locate note hidden when row is found', (root.querySelector('.locate-note') || {}).textContent || '', '');
+  const copiedNote = (root.querySelector('.locate-note') || {}).textContent || '';
+  check('click copies ID via GM_setClipboard', window.__zclickClipboard.map(x => x.via + ':' + x.data), ['gm:000000']);
+  check('click shows ID copied note', copiedNote, 'ID copied');
+  check('ID copied note does not display the ID', copiedNote.indexOf('000000') === -1, true);
+  check('click does not log the ID', logs.join('\n').indexOf('000000') === -1, true);
 
   const yesterdayP1 = { patient: P1, matched: [], unmatched: [{ series: 'MR BRAIN', submitted: '2026-11-11 09:00:00' }] };
   window.__zclickScrolls = [];
@@ -274,11 +305,33 @@ function loadApi(html) {
 
   const missingGroup = { patient: 'BROWN, PAT (222222)', matched: [], unmatched: [{ series: 'CT OTHER', submitted: '2026-11-12 10:00:00' }] };
   const missingOk = api.locatePatient(missingGroup);
+  const missingNote = (root.querySelector('.locate-note') || {}).textContent || '';
   check('missing page row returns false', missingOk, false);
-  check('missing page row shows not-on-page note', (root.querySelector('.locate-note') || {}).textContent, 'not on this page');
+  check('missing page row shows not-on-page note', missingNote.indexOf('not on this page') !== -1, true);
+  check('missing page row also copies ID', missingNote.indexOf('ID copied') !== -1, true);
+  check('missing locate note does not display the ID', missingNote.indexOf('222222') === -1, true);
   check('missing locate does not log the name', logs.join('\n').indexOf('BROWN, PAT') === -1, true);
+  check('missing locate does not log the ID', logs.join('\n').indexOf('222222') === -1, true);
 
   window.console.log = origLog;
+}
+
+{
+  // Fake values only: a patient cell with no ID in parentheses.
+  const { api, window } = loadApi(
+    '<table id="noid">' +
+    '<thead><tr><th>Patient</th><th>Workflow</th><th>Template</th><th>Series Description</th><th>Date Submitted</th></tr></thead>' +
+    '<tbody><tr id="noid-row"><td>DOE, JANE</td><td>KP_ROS</td><td>-</td><td>CT HEAD</td><td>2026-11-12 13:51:51</td></tr></tbody></table>'
+  );
+  api.addPanel();
+  const root = api.panelRoot();
+  window.__zclickClipboard = [];
+  const link = root && root.querySelector('button.patient-link');
+  if (link) link.click();
+  const note = ((root && root.querySelector('.locate-note')) || {}).textContent || '';
+  check('missing ID copies nothing', window.__zclickClipboard.length, 0);
+  check('missing ID shows ID not found', note, 'ID not found');
+  check('missing ID note has no patient text', note.indexOf('DOE') === -1 && note.indexOf('JANE') === -1, true);
 }
 
 {
@@ -292,7 +345,61 @@ function loadApi(html) {
   const root = api.panelRoot();
   const row = root && root.querySelector('table.grid tbody tr.alert');
   check('unmatched-only row is highlighted', !!(row && row.classList.contains('alert') && row.querySelector('.alert-mark')), true);
+  check('unmatched-only row is not an error row', !!(row && !row.classList.contains('has-error')), true);
   check('unmatched-only table still one row per patient', root ? root.querySelectorAll('table.grid tr.day-today, table.grid tr.day-yesterday').length : 0, 1);
+}
+
+{
+  // Fake statuses and placeholder names only.
+  const P_ERR = 'ROE, ANN (333333)';
+  const P_ONLY = 'LEE, FAKE (444444)';
+  const html = '<table id="errs">' +
+    '<thead><tr><th>Status</th><th>Template</th><th>Patient</th><th>Workflow</th><th>Series Description</th><th>Date Submitted</th></tr></thead>' +
+    '<tbody>' +
+    '<tr><td>Error</td><td>-</td><td>' + P_ERR + '</td><td>KP_ROS</td><td>CT HEAD</td><td>2026-11-12 10:00:00</td></tr>' +
+    '<tr><td>Completed</td><td>Head and Neck</td><td>' + P_ERR + '</td><td>KP_ROS</td><td>CT NECK</td><td>2026-11-12 10:05:00</td></tr>' +
+    '<tr><td>Transferred</td><td>-</td><td>' + P_ERR + '</td><td>KP_ROS</td><td>CT OTHER</td><td>2026-11-12 12:00:00</td></tr>' +
+    '<tr><td>Failed</td><td>-</td><td>' + P_ONLY + '</td><td>KP_ROS</td><td>CT FAIL</td><td>2026-11-12 11:00:00</td></tr>' +
+    '<tr><td>Cancelled</td><td>Thorax</td><td>' + P_ERR + '</td><td>KP_ROS</td><td>CT ABDOMEN</td><td>2026-11-11 09:00:00</td></tr>' +
+    '<tr><td>Timeout</td><td>-</td><td>' + P_ONLY + '</td><td>KP_ROS</td><td>CT TO</td><td>2026-11-11 08:00:00</td></tr>' +
+    '</tbody></table>';
+  const { api } = loadApi(html);
+  const summary = api.groupByPatient(api.extractRows(), NOW);
+  check('error fixture counts four problem series', summary.errorCount, 4);
+  check('Transferred is excluded from the error count', summary.seriesCount, 6);
+  api.addPanel();
+  const root = api.panelRoot();
+  const totals = root && root.querySelector('.totals') ? root.querySelector('.totals').textContent : '';
+  const errSpan = root && root.querySelector('.error-count');
+  check('stats line appends red error count', !!(errSpan && errSpan.textContent === '4 errors' && /4 errors/.test(totals)), true);
+  check('error count is in a red error-count span', !!(errSpan && errSpan.classList.contains('error-count')), true);
+  const css = (root.querySelector('style') || {}).textContent || '';
+  check('error CSS uses red border with priority over orange', css.indexOf('has-error') !== -1 && css.indexOf('#c62828') !== -1 && css.indexOf('alert.has-error') !== -1, true);
+
+  const todayRows = [...root.querySelectorAll('tr.day-today')];
+  const yestRows = [...root.querySelectorAll('tr.day-yesterday')];
+  const errToday = todayRows.find(tr => tr.textContent.indexOf(P_ERR) !== -1);
+  const onlyToday = todayRows.find(tr => tr.textContent.indexOf(P_ONLY) !== -1);
+  const errYest = yestRows.find(tr => tr.textContent.indexOf(P_ERR) !== -1);
+  const onlyYest = yestRows.find(tr => tr.textContent.indexOf(P_ONLY) !== -1);
+
+  check('patient with a matched series and an error is not unmatched-only', !!(errToday && errToday.classList.contains('has-error') && !errToday.classList.contains('alert')), true);
+  check('unmatched-only error row keeps the marker and red class', !!(onlyToday && onlyToday.classList.contains('alert') && onlyToday.classList.contains('has-error') && onlyToday.querySelector('.alert-mark')), true);
+  check('yesterday cancelled matched series is a red error row', !!(errYest && errYest.classList.contains('has-error') && !errYest.classList.contains('alert')), true);
+  check('yesterday timeout unmatched-only is red over orange', !!(onlyYest && onlyYest.classList.contains('has-error') && onlyYest.classList.contains('alert')), true);
+
+  const errChips = errToday ? [...errToday.querySelectorAll('.status-chip')].map(c => c.textContent) : [];
+  const onlyChips = onlyToday ? [...onlyToday.querySelectorAll('.status-chip')].map(c => c.textContent) : [];
+  const yestChips = errYest ? [...errYest.querySelectorAll('.status-chip')].map(c => c.textContent) : [];
+  const yestOnlyChips = onlyYest ? [...onlyYest.querySelectorAll('.status-chip')].map(c => c.textContent) : [];
+  check('error series shows a red Error chip', errChips, ['Error']);
+  check('failed unmatched series shows a Failed chip', onlyChips, ['Failed']);
+  check('cancelled matched series shows a Cancelled chip', yestChips, ['Cancelled']);
+  check('timeout series shows a Timeout chip', yestOnlyChips, ['Timeout']);
+  const errLine = errToday && errToday.querySelector('.cell-line.series-error');
+  check('error line stays red and includes the series label', !!(errLine && errLine.classList.contains('series-error') && /CT HEAD/.test(errLine.textContent) && /Error/.test(errLine.textContent)), true);
+  const transferred = errToday ? errToday.textContent : '';
+  check('transferred series is listed without an error chip', transferred.indexOf('CT OTHER') !== -1 && ![...errToday.querySelectorAll('.status-chip')].some(c => /Transferred/i.test(c.textContent)), true);
 }
 
 {
@@ -459,10 +566,35 @@ function loadApi(html) {
   });
 }
 
+function runClipboardFallback() {
+  const { api, window } = loadApi(jobsTableHtml());
+  window.__zclickClipboard = [];
+  window.GM_setClipboard = undefined;
+  window.navigator.clipboard = {
+    writeText: function (data) {
+      window.__zclickClipboard.push({ via: 'nav', data: String(data == null ? '' : data) });
+      return Promise.resolve();
+    }
+  };
+  return api.copyPatientId('SMITH, JOHN (111111)').then(function (status) {
+    check('clipboard falls back to navigator.clipboard', status, 'copied');
+    check('fallback copies the fake ID only', window.__zclickClipboard, [{ via: 'nav', data: '111111' }]);
+    return api.copyPatientId('DOE, JANE');
+  }).then(function (status) {
+    check('fallback copies nothing without an ID', status, 'missing');
+    check('fallback without ID does not write clipboard again', window.__zclickClipboard.length, 1);
+  });
+}
+
 function finish() {
-  if (failed) {
-    console.error(failed + ' failed');
-    process.exit(1);
-  }
-  console.log('all tests passed');
+  Promise.resolve().then(runClipboardFallback).catch(function (err) {
+    failed++;
+    console.log('FAIL clipboard fallback threw ' + String(err && err.message || err));
+  }).then(function () {
+    if (failed) {
+      console.error(failed + ' failed');
+      process.exit(1);
+    }
+    console.log('all tests passed');
+  });
 }
