@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         0click
 // @namespace    https://github.com/mobility22/0click
-// @version      1.2
+// @version      1.3
 // @description  Read-only AutoContour Zero-Click Jobs History summary
 // @match        http://10.240.61.81:18001/*
 // @updateURL    https://raw.githubusercontent.com/mobility22/0click/refs/heads/main/0click.user.js
@@ -10,13 +10,13 @@
 // @grant        unsafeWindow
 // ==/UserScript==
 
-// 0click 1.2 — AutoContour Zero-Click Jobs History summary (read-only)
+// 0click 1.3 — AutoContour Zero-Click Jobs History summary (read-only)
 
 (function () {
   'use strict';
   const TAG = '[0click]';
-  const SCRIPT_VERSION = '1.2';
-  const PANEL_TITLE = '0click 1.2';
+  const SCRIPT_VERSION = '1.3';
+  const PANEL_TITLE = '0click 1.3';
   const PANEL_ID = 'zclick-panel';
   const DEBOUNCE_MS = 250;
   const PAGE_SIZE = 500;
@@ -112,55 +112,141 @@
     if (short.length < full.length) short += '…';
     return short;
   }
-  function consolidateUnmatched(items) {
+  const PHASE_RE = /^T=(\d+)%/;
+  const MAX_CELL_LINES = 3;
+  function parsePhasePercent(text) {
+    const m = PHASE_RE.exec(norm(text));
+    return m ? Number(m[1]) : null;
+  }
+  function firstSeriesToken(text) {
+    const full = norm(text);
+    if (!full) return '';
+    const m = /^([A-Za-z][A-Za-z0-9_.-]*(?:\([^)]+\))?)/.exec(full);
+    if (m) return m[1];
+    return full.split(/\s+/)[0] || full;
+  }
+  function uniqueSortedNums(nums) {
+    return [...new Set((nums || []).filter(n => Number.isFinite(n)))].sort((a, b) => a - b);
+  }
+  function compactPhaseList(percents) {
+    const nums = uniqueSortedNums(percents);
+    if (!nums.length) return '';
+    if (nums.length === 1) return 'T ' + nums[0] + '%';
+    if (nums.length <= 5) return 'T ' + nums.join(',') + '%';
+    return 'T ' + nums[0] + ',' + nums[1] + ',' + nums[2] + ',\u2026,' + nums[nums.length - 1] + '%';
+  }
+  function phaseLineLabel(percents, count) {
+    const nums = uniqueSortedNums(percents);
+    let inner = compactPhaseList(nums);
+    if (nums.length >= 5) inner = 'T ' + nums[0] + '\u2013' + nums[nums.length - 1] + '%';
+    return '4D phases \u00d7' + count + ' (' + inner + ')';
+  }
+  function templatePrefix(templates) {
+    const uniq = [];
+    for (const t of templates || []) {
+      const s = norm(t);
+      if (s && uniq.indexOf(s) === -1) uniq.push(s);
+    }
+    return uniq.length ? uniq.join(', ') + ' \u2190 ' : '';
+  }
+  function packLines(lead, groups, maxLines) {
+    const out = [];
+    if (lead) out.push(lead);
+    const room = Math.max(1, maxLines - out.length);
+    if (groups.length <= room) return out.concat(groups);
+    const head = groups.slice(0, room - 1);
+    const tail = groups.slice(room - 1);
+    const packed = {
+      label: tail.map(g => g.label).join(', '),
+      title: tail.map(g => g.title).filter(Boolean).join('\n')
+    };
+    return out.concat(head).concat([packed]);
+  }
+  function consolidateSeriesLines(items, withTemplate) {
+    const list = items || [];
+    const phases = [];
+    const other = [];
+    for (const item of list) {
+      const full = norm(item && item.series) || '(no series description)';
+      if (parsePhasePercent(full) != null) phases.push(item);
+      else other.push(item);
+    }
+    const allTitles = list.map(item => {
+      const full = norm(item && item.series) || '(no series description)';
+      const tmpl = withTemplate ? norm(item && item.template) : '';
+      return tmpl ? (tmpl + ' \u2190 ' + full) : full;
+    });
+    const fullTitle = allTitles.join('\n');
+    let lead = null;
+    if (phases.length) {
+      const percents = phases.map(item => parsePhasePercent(item && item.series));
+      const tmpl = withTemplate ? templatePrefix(phases.map(item => item && item.template)) : '';
+      lead = {
+        label: tmpl + phaseLineLabel(percents, phases.length),
+        title: (compactPhaseList(percents) ? compactPhaseList(percents) + '\n' : '') +
+          phases.map(item => {
+            const full = norm(item && item.series) || '(no series description)';
+            const t = withTemplate ? norm(item && item.template) : '';
+            return t ? (t + ' \u2190 ' + full) : full;
+          }).join('\n')
+      };
+    }
     const order = [];
     const map = new Map();
-    for (const item of items || []) {
+    for (const item of other) {
       const full = norm(item && item.series) || '(no series description)';
-      const short = shortSeriesLabel(item && item.series) || full;
-      if (!map.has(short)) {
-        map.set(short, { short: short, count: 0, fulls: [] });
-        order.push(short);
+      const token = firstSeriesToken(full) || full;
+      if (!map.has(token)) {
+        map.set(token, { token: token, items: [] });
+        order.push(token);
       }
-      const g = map.get(short);
-      g.count++;
-      if (full && g.fulls.indexOf(full) === -1) g.fulls.push(full);
+      map.get(token).items.push(item);
     }
-    return order.map(k => {
-      const g = map.get(k);
-      return {
-        short: g.short,
-        count: g.count,
-        label: g.count > 1 ? g.short + ' ×' + g.count : g.short,
-        title: g.fulls.join('\n')
-      };
+    const groups = order.map(token => {
+      const recs = map.get(token).items;
+      const first = recs[0];
+      const short = shortSeriesLabel(first && first.series) || token;
+      const tmpl = withTemplate ? templatePrefix(recs.map(r => r && r.template)) : '';
+      const label = tmpl + short + (recs.length > 1 ? ' \u00d7' + recs.length : '');
+      const title = recs.map(r => {
+        const full = norm(r && r.series) || '(no series description)';
+        const t = withTemplate ? norm(r && r.template) : '';
+        return t ? (t + ' \u2190 ' + full) : full;
+      }).join('\n');
+      return { label: label, title: title };
     });
+    const lines = packLines(lead, groups, MAX_CELL_LINES);
+    return lines.map(line => ({ label: line.label, title: line.title || fullTitle }));
+  }
+  function consolidateUnmatched(items) {
+    return consolidateSeriesLines(items, false);
   }
   function formatMatchedItems(items) {
-    const order = [];
-    const map = new Map();
-    for (const item of items || []) {
-      const tmpl = norm(item && item.template);
-      const full = norm(item && item.series) || '(no series description)';
-      const short = shortSeriesLabel(item && item.series) || full;
-      const display = tmpl ? (tmpl + ' ← ' + short) : short;
-      if (!map.has(display)) {
-        map.set(display, { display: display, count: 0, fulls: [] });
-        order.push(display);
-      }
-      const g = map.get(display);
-      g.count++;
-      const tip = tmpl ? (tmpl + ' ← ' + full) : full;
-      if (g.fulls.indexOf(tip) === -1) g.fulls.push(tip);
-    }
-    return order.map(k => {
-      const g = map.get(k);
-      return {
-        label: g.count > 1 ? g.display + ' ×' + g.count : g.display,
-        title: g.fulls.join('\n'),
-        count: g.count
-      };
-    });
+    return consolidateSeriesLines(items, true);
+  }
+  function dayKind(text, now) {
+    const d = parseSubmittedDate(text);
+    if (!d) return null;
+    const today = startOfLocalDay(now || nowFn());
+    const yesterday = new Date(today.getFullYear(), today.getMonth(), today.getDate() - 1);
+    const t = startOfLocalDay(d).getTime();
+    if (t === today.getTime()) return 'today';
+    if (t === yesterday.getTime()) return 'yesterday';
+    return null;
+  }
+  function rowsForDay(rows, which, now) {
+    const when = now || nowFn();
+    return (rows || []).filter(r => r && dayKind(r.submitted, when) === which);
+  }
+  function summarizeDay(rows, which, now) {
+    const when = now || nowFn();
+    const range = lastTwoDayRange(when);
+    const dayDate = which === 'today' ? range.end : range.start;
+    const summary = groupByPatient(rowsForDay(rows, which, when), when);
+    summary.day = which;
+    summary.dateLabel = formatLocalDate(dayDate);
+    summary.sectionTitle = (which === 'today' ? 'TODAY' : 'YESTERDAY') + ' (' + summary.dateLabel + ')';
+    return summary;
   }
   function lastTwoDayRange(now) {
     const today = startOfLocalDay(now || nowFn());
@@ -929,16 +1015,17 @@
     if (text != null && text !== '') node.textContent = text;
     return node;
   }
-  function addChips(td, items, kind) {
+  function addLines(td, items, kind) {
     if (!items.length) {
       td.appendChild(el('span', 'none', '—'));
       return;
     }
-    const wrap = el('div', 'chips');
+    const wrap = el('div', 'cell-lines');
+    wrap.title = items.map(item => item.title).filter(Boolean).join('\n') || items.map(item => item.label).join('\n');
     for (const item of items) {
-      const chip = el('span', 'chip ' + kind, item.label);
-      if (item.title) chip.title = item.title;
-      wrap.appendChild(chip);
+      const line = el('div', 'cell-line ' + kind, item.label);
+      if (item.title) line.title = item.title;
+      wrap.appendChild(line);
     }
     td.appendChild(wrap);
   }
@@ -947,20 +1034,29 @@
     if (info.source === 'api') return 'Source: GET ' + (info.path || '/');
     return 'Source: visible table (API not detected; may be limited by page filters or pagination)';
   }
-  function renderSummaryTable(body, summary) {
-    const table = el('table', 'grid');
-    const thead = el('thead');
-    const hr = el('tr');
-    hr.appendChild(el('th', '', 'Patient'));
-    hr.appendChild(el('th', '', 'Unmatched (' + summary.unmatchedCount + ')'));
-    hr.appendChild(el('th', '', 'Matched'));
-    hr.appendChild(el('th', '', 'Last submitted'));
-    thead.appendChild(hr);
-    table.appendChild(thead);
-    const tbody = el('tbody');
-    for (const g of summary.groups) {
-      const tr = el('tr', (g.unmatchedCount > 0 && g.matchedCount === 0) ? 'alert' : '');
+  function appendPatientRows(tbody, daySummary) {
+    const day = daySummary.day;
+    const sec = el('tr', 'section section-' + day);
+    const th = el('th', 'section-head');
+    th.colSpan = 4;
+    th.textContent =
+      daySummary.sectionTitle +
+      ' · ' + daySummary.patientCount + ' patient' + (daySummary.patientCount === 1 ? '' : 's') +
+      ' · ' + daySummary.seriesCount + ' series · ' +
+      daySummary.matchedCount + ' matched · ' +
+      daySummary.unmatchedCount + ' unmatched';
+    sec.appendChild(th);
+    tbody.appendChild(sec);
+    for (const g of daySummary.groups) {
+      const alert = g.unmatchedCount > 0 && g.matchedCount === 0;
+      const tr = el('tr', 'day-' + day + (alert ? ' alert' : ''));
       const ptd = el('td', 'patient-cell');
+      if (alert) {
+        const mark = el('span', 'alert-mark', '!');
+        mark.title = 'Unmatched only';
+        ptd.appendChild(mark);
+        ptd.appendChild(document.createTextNode(' '));
+      }
       const btn = el('button', 'patient-link', g.patient);
       btn.type = 'button';
       btn.addEventListener('click', ev => {
@@ -971,24 +1067,48 @@
       ptd.appendChild(btn);
       tr.appendChild(ptd);
       const utd = el('td', 'unmatched-cell');
-      addChips(utd, consolidateUnmatched(g.unmatched), 'unmatched');
+      addLines(utd, consolidateUnmatched(g.unmatched), 'unmatched');
       tr.appendChild(utd);
       const mtd = el('td', 'matched-cell');
-      addChips(mtd, formatMatchedItems(g.matched), 'matched');
+      addLines(mtd, formatMatchedItems(g.matched), 'matched');
       tr.appendChild(mtd);
       const all = (g.matched || []).concat(g.unmatched || []);
       const latest = latestSubmittedText(all);
-      const ttd = el('td', 'time', latest ? formatLastSubmitted(latest) : '—');
-      if (latest) ttd.title = String(latest);
+      const ttd = el('td', 'time');
+      if (latest) {
+        const badge = el('span', 'badge ' + (day === 'today' ? 'today' : 'yest'), day === 'today' ? 'Today' : 'Yest.');
+        ttd.appendChild(badge);
+        const dt = parseSubmittedDateTime(latest);
+        ttd.appendChild(document.createTextNode(' ' + (dt ? formatClock(dt) : formatLastSubmitted(latest))));
+        ttd.title = String(latest);
+      } else {
+        ttd.appendChild(el('span', 'none', '—'));
+      }
       tr.appendChild(ttd);
       tbody.appendChild(tr);
     }
+  }
+  function renderSummaryTable(body, rows, overall) {
+    const today = summarizeDay(rows, 'today');
+    const yesterday = summarizeDay(rows, 'yesterday');
+    const table = el('table', 'grid');
+    const thead = el('thead');
+    const hr = el('tr');
+    hr.appendChild(el('th', '', 'Patient'));
+    hr.appendChild(el('th', '', 'Unmatched (' + overall.unmatchedCount + ')'));
+    hr.appendChild(el('th', '', 'Matched'));
+    hr.appendChild(el('th', '', 'Last submitted'));
+    thead.appendChild(hr);
+    table.appendChild(thead);
+    const tbody = el('tbody');
+    appendPatientRows(tbody, today);
+    appendPatientRows(tbody, yesterday);
     table.appendChild(tbody);
     const tfoot = el('tfoot');
     const fr = el('tr');
-    fr.appendChild(el('td', '', summary.patientCount + ' patient' + (summary.patientCount === 1 ? '' : 's')));
-    fr.appendChild(el('td', '', summary.unmatchedCount + ' unmatched'));
-    fr.appendChild(el('td', '', summary.matchedCount + ' matched'));
+    fr.appendChild(el('td', '', overall.patientCount + ' patient' + (overall.patientCount === 1 ? '' : 's')));
+    fr.appendChild(el('td', '', overall.unmatchedCount + ' unmatched'));
+    fr.appendChild(el('td', '', overall.matchedCount + ' matched'));
     fr.appendChild(el('td', '', ''));
     tfoot.appendChild(fr);
     table.appendChild(tfoot);
@@ -1020,7 +1140,7 @@
     } else if (!summary.seriesCount) {
       body.appendChild(el('div', 'empty', 'No matching workflow jobs in the last two days.'));
     } else {
-      renderSummaryTable(body, summary);
+      renderSummaryTable(body, info.rows, summary);
     }
     log(
       'summary',
@@ -1063,7 +1183,7 @@
     if (document.getElementById(PANEL_ID)) return;
     const panel = document.createElement('div');
     panel.id = PANEL_ID;
-    panel.style.cssText = 'position:fixed;top:12px;right:12px;z-index:99999;width:700px;max-width:calc(100vw - 24px);min-width:520px;min-height:180px;height:520px;max-height:calc(100vh - 24px);resize:both;overflow:hidden;background:transparent;';
+    panel.style.cssText = 'position:fixed;bottom:16px;right:16px;top:auto;z-index:99999;width:700px;max-width:calc(100vw - 32px);min-width:520px;min-height:180px;height:520px;max-height:calc(100vh - 32px);resize:both;overflow:hidden;background:transparent;';
     // Closed shadow root so Ctrl+F does not match panel text (including patient names).
     panelShadow = panel.attachShadow({ mode: 'closed' });
     panelShadow.innerHTML =
@@ -1085,19 +1205,25 @@
       'table.grid { width: 100%; border-collapse: collapse; table-layout: auto; }' +
       'table.grid th, table.grid td { border: 1px solid #c5d4e8; padding: 5px 7px; vertical-align: top; text-align: left; }' +
       'table.grid thead th { position: sticky; top: 0; background: #1565c0; color: #fff; z-index: 1; font-weight: 700; box-shadow: 0 1px 0 #0d47a1; }' +
-      'table.grid tbody tr:nth-child(odd) { background: #fff; }' +
-      'table.grid tbody tr:nth-child(even) { background: #f4f8fc; }' +
-      'table.grid tbody tr.alert { background: #fff3e0; }' +
-      'table.grid tbody tr.alert:nth-child(even) { background: #ffe8cc; }' +
+      'table.grid tbody tr.section-today th { position: sticky; top: 24px; background: #1565c0; color: #fff; font-weight: 800; letter-spacing: .03em; box-shadow: 0 1px 0 #0d47a1; }' +
+      'table.grid tbody tr.section-yesterday th { position: sticky; top: 24px; background: #546e7a; color: #fff; font-weight: 800; letter-spacing: .03em; box-shadow: 0 1px 0 #37474f; }' +
+      'table.grid tbody tr.day-today td { background: #e3f2fd; border-left: 4px solid #1976d2; }' +
+      'table.grid tbody tr.day-yesterday td { background: #eceff1; color: #546e7a; border-left: 4px solid #90a4ae; }' +
+      'table.grid tbody tr.day-yesterday .patient-link { color: #37474f; }' +
+      'table.grid tbody tr.alert td.patient-cell { box-shadow: inset 3px 0 0 #ef6c00; }' +
       'table.grid tfoot td { position: sticky; bottom: 0; background: #eceff1; font-weight: 700; box-shadow: 0 -1px 0 #cfd8dc; }' +
       'td.patient-cell { font-weight: 600; white-space: nowrap; }' +
       'button.patient-link { background: none; border: 0; padding: 0; font: inherit; font-weight: 600; color: #0d47a1; text-decoration: underline; cursor: pointer; }' +
       'td.time { white-space: nowrap; color: #333; }' +
+      '.badge { display: inline-block; font-size: 10px; font-weight: 800; padding: 1px 5px; border-radius: 3px; margin-right: 2px; letter-spacing: .03em; vertical-align: middle; }' +
+      '.badge.today { background: #1976d2; color: #fff; }' +
+      '.badge.yest { background: #78909c; color: #fff; }' +
+      '.alert-mark { display: inline-block; margin-right: 4px; background: #ef6c00; color: #fff; font-weight: 800; font-size: 10px; line-height: 1.4; padding: 0 5px; border-radius: 3px; vertical-align: middle; }' +
       '.locate-note { display: none; padding: 4px 10px; font-size: 11px; color: #b71c1c; flex: 0 0 auto; }' +
-      '.chips { display: flex; flex-wrap: wrap; gap: 4px; }' +
-      '.chip { display: inline-block; border-radius: 10px; padding: 1px 7px; font-size: 11px; line-height: 1.4; max-width: 100%; }' +
-      '.chip.unmatched { background: #fff8e1; border: 1px solid #ffcc80; }' +
-      '.chip.matched { background: #e8f5e9; border: 1px solid #a5d6a7; }' +
+      '.cell-lines { display: flex; flex-direction: column; gap: 1px; }' +
+      '.cell-line { font-size: 11px; line-height: 1.35; }' +
+      '.cell-line.unmatched { }' +
+      '.cell-line.matched { }' +
       '.none { color: #888; }' +
       '</style>' +
       '<div class="wrap">' +
@@ -1165,6 +1291,8 @@
       isAllowedGet, buildExpandedUrls, nextPageUrl, fetchExpanded, considerResponse,
       hookNetwork, getRowsAndSource, resetApiState, sourceLabel, safePath, debugEnabled,
       shortSeriesLabel, consolidateUnmatched, formatMatchedItems, formatLastSubmitted, latestSubmittedText,
+      parsePhasePercent, firstSeriesToken, compactPhaseList, phaseLineLabel, consolidateSeriesLines,
+      dayKind, summarizeDay, rowsForDay, MAX_CELL_LINES,
       collectDomJobRows, findPatientDomRow, locatePatient, highlightDomRow, setLocateNote, FLASH_MS,
       setApiRowsForTest: (rows, path) => { apiRows = rows; apiPath = path || '/api/jobs'; apiState = rows ? 'api' : 'idle'; lastJobsUrl = path || lastJobsUrl; },
       norm

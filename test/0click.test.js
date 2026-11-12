@@ -11,10 +11,10 @@ function check(name, got, expected) {
   console.log((ok ? 'PASS' : 'FAIL') + ' ' + name + ' got ' + JSON.stringify(got) + ' expected ' + JSON.stringify(expected));
 }
 
-check('script @version 1.2', /@version\s+1\.2\b/.test(src), true);
-check('script SCRIPT_VERSION', /const SCRIPT_VERSION = '1\.2'/.test(src), true);
-check('script header comment 0click 1.2', /\/\/ 0click 1\.2\b/.test(src), true);
-check('script PANEL_TITLE', /const PANEL_TITLE = '0click 1\.2'/.test(src), true);
+check('script @version 1.3', /@version\s+1\.3\b/.test(src), true);
+check('script SCRIPT_VERSION', /const SCRIPT_VERSION = '1\.3'/.test(src), true);
+check('script header comment 0click 1.3', /\/\/ 0click 1\.3\b/.test(src), true);
+check('script PANEL_TITLE', /const PANEL_TITLE = '0click 1\.3'/.test(src), true);
 check('script @run-at document-start', /@run-at\s+document-start/.test(src), true);
 check('script closed shadow', src.includes("attachShadow({ mode: 'closed' })"), true);
 check('script @downloadURL raw main', src.includes('https://raw.githubusercontent.com/mobility22/0click/refs/heads/main/0click.user.js'), true);
@@ -28,6 +28,9 @@ check('GET only: no POST/PUT/DELETE issued', !/method:\s*['"]POST['"]/.test(src)
 const userscriptHeader = src.split('(function ()')[0];
 check('userscript header/metadata has no ROS', /ROS/.test(userscriptHeader), false);
 check('ROS workflow filter logic kept', /function isRosWorkflow/.test(src) && /\/ROS\/i/.test(src), true);
+const readme = fs.readFileSync(path.join(__dirname, '..', 'README.md'), 'utf8');
+check('README has no ROS', /ROS/.test(readme), false);
+
 
 function loadJsdom() {
   const tries = ['jsdom', '/tmp/jsdom-root/node_modules/jsdom', path.join(__dirname, '../node_modules/jsdom')];
@@ -148,7 +151,7 @@ function loadApi(html) {
   check('panel host light DOM has no patient text', light.indexOf(P1) === -1 && light.indexOf(P2) === -1, true);
   const root = api.panelRoot();
   check('panel uses closed shadow root', !!(root && root.mode === 'closed'), true);
-  check('panel title is 0click 1.2', !!(root && root.querySelector('.title') && root.querySelector('.title').textContent === '0click 1.2'), true);
+  check('panel title is 0click 1.3', !!(root && root.querySelector('.title') && root.querySelector('.title').textContent === '0click 1.3'), true);
   check('panel has refresh button', !!(root && root.querySelector('.refresh')), true);
   check('panel header shows date range', !!(root && root.querySelector('.range') && root.querySelector('.range').textContent === '2026-11-11 \u2013 2026-11-12'), true);
   const bodyText = root && root.querySelector('.body') ? root.querySelector('.body').textContent : '';
@@ -160,7 +163,7 @@ function loadApi(html) {
   check('table column Unmatched (N)', /^Unmatched \(\d+\)$/.test(heads[1] || ''), true);
   check('table column Matched', heads[2], 'Matched');
   check('table column Last submitted', heads[3], 'Last submitted');
-  check('one table row per patient', grid ? grid.querySelectorAll('tbody tr').length : 0, 2);
+  check('one table row per patient per day', grid ? grid.querySelectorAll('tbody tr.day-today, tbody tr.day-yesterday').length : 0, 4);
   check('panel lists unmatched heading', /Unmatched \(/.test(bodyText), true);
   check('panel lists matched heading', heads[2] === 'Matched', true);
   check('panel does not list excluded non-ROS series', bodyText.indexOf('CT CHEST') === -1, true);
@@ -173,27 +176,70 @@ function loadApi(html) {
   check('short label first 3 words or ~20 chars', api.shortSeriesLabel('Ave-IP(10) Axial 2.0 mm FREE BREATHING'), 'Ave-IP(10) Axial 2.0…');
   const longTok = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
   check('short label trims a long token', api.shortSeriesLabel(longTok), 'ABCDEFGHIJKLMNOPQRST…');
-  const cons = api.consolidateUnmatched([
+  check('first token strips trailing words', api.firstSeriesToken('Ave-IP(10) Axial 2.0 mm'), 'Ave-IP(10)');
+  check('phase parse T=90%', api.parsePhasePercent('T=90%,PR=86% -> 93%AR(cm)=1.2'), 90);
+  check('phase parse T=0%', api.parsePhasePercent('T=0%,PR=97% -> 10%AR(cm)=1.1'), 0);
+  const phaseItems = [0, 10, 20, 30, 40, 50, 60, 70, 80, 90].map(n => ({
+    series: 'T=' + n + '%,PR=' + (90 - n) + '% -> ' + (n + 3) + '%AR(cm)=1.0'
+  }));
+  const phaseLines = api.consolidateUnmatched(phaseItems);
+  check('4D phases collapse to one line', phaseLines.length, 1);
+  check('4D phases label uses count and range', phaseLines[0].label, '4D phases ×10 (T 0–90%)');
+  check('4D phases tooltip lists percents and full fake descriptions', phaseLines[0].title.indexOf('T 0,10,20') !== -1 && phaseLines[0].title.indexOf('T=90%,PR=0%') !== -1, true);
+  const mixed = api.consolidateUnmatched([
+    { series: 'Ave-IP(10) Axial 2.0 mm A' },
+    { series: 'Ave-IP(10) Axial 2.0 mm B' },
+    { series: 'MIP(10) 2.0 mm' },
+    { series: 'CT HEAD' }
+  ].concat(phaseItems));
+  check('mixed cell stays within about 3 lines', mixed.length <= 3, true);
+  check('mixed cell has a 4D phases line first', mixed[0].label, '4D phases ×10 (T 0–90%)');
+  const mixedText = mixed.map(l => l.label).join(' | ');
+  check('mixed cell groups Ave-IP with count', mixedText.indexOf('Ave-IP(10) Axial 2.0… ×2') !== -1, true);
+  check('mixed cell tooltip keeps full fake descriptions', mixed.some(l => l.title && l.title.indexOf('Ave-IP(10) Axial 2.0 mm A') !== -1 && l.title.indexOf('Ave-IP(10) Axial 2.0 mm B') !== -1), true);
+  const tokenOnly = api.consolidateUnmatched([
     { series: 'Ave-IP(10) Axial 2.0 mm A' },
     { series: 'Ave-IP(10) Axial 2.0 mm B' },
     { series: 'CT HEAD' }
   ]);
-  check('consolidate repeats into one chip with count', cons.map(c => c.label), ['Ave-IP(10) Axial 2.0… ×2', 'CT HEAD']);
-  check('consolidate tooltip has full descriptions', cons[0].title.indexOf('Ave-IP(10) Axial 2.0 mm A') !== -1 && cons[0].title.indexOf('Ave-IP(10) Axial 2.0 mm B') !== -1, true);
-  const matched = api.formatMatchedItems([{ template: 'ROS_Thorax', series: 'Ave-IP(10) Axial 2.0 mm FREE BREATHING' }]);
-  check('matched label is template plus short series', matched[0].label, 'ROS_Thorax ← Ave-IP(10) Axial 2.0…');
+  check('token groups use ×count for repeats', tokenOnly.some(l => l.label.indexOf('Ave-IP(10) Axial 2.0… ×2') !== -1) && tokenOnly.some(l => l.label.indexOf('CT HEAD') !== -1), true);
+  const matched = api.formatMatchedItems([{ template: 'Thorax', series: 'Ave-IP(10) Axial 2.0 mm FREE BREATHING' }]);
+  check('matched label is template plus short series', matched[0].label, 'Thorax ← Ave-IP(10) Axial 2.0…');
+  const matchedMany = api.formatMatchedItems([
+    { template: 'Thorax', series: 'Ave-IP(10) Axial 2.0 mm A' },
+    { template: 'Thorax', series: 'Ave-IP(10) Axial 2.0 mm B' },
+    { template: 'Thorax', series: 'T=0%,PR=97% -> 10%AR(cm)=1.1' },
+    { template: 'Thorax', series: 'T=90%,PR=86% -> 93%AR(cm)=1.2' }
+  ]);
+  check('matched 4D and tokens stay within 3 lines', matchedMany.length <= 3, true);
+  check('matched 4D line includes template', /Thorax ← 4D phases ×2 \(T 0[,–]90%\)/.test(matchedMany[0].label) || matchedMany[0].label.indexOf('Thorax ← 4D phases ×2') !== -1, true);
 
-  const p1Row = grid && grid.querySelectorAll('tbody tr')[0];
-  const p2Row = grid && grid.querySelectorAll('tbody tr')[1];
-  const uChips = p1Row ? [...p1Row.querySelectorAll('.chip.unmatched')].map(c => c.textContent) : [];
-  const mChips = p1Row ? [...p1Row.querySelectorAll('.chip.matched')].map(c => c.textContent) : [];
-  check('P1 unmatched chips consolidated in one cell', uChips.slice().sort().join('|'), ['CT HEAD', 'MR BRAIN'].join('|'));
-  check('P1 unmatched tooltip is full description', !!(p1Row && p1Row.querySelector('.chip.unmatched[title="CT HEAD"]')), true);
-  check('P1 matched chip uses template arrow short series', mChips, ['Head and Neck ← CT NECK']);
-  check('P1 last submitted is latest time', p1Row ? p1Row.querySelector('td.time').textContent : '', '13:51:51');
-  check('neither default row is unmatched-only highlight', !!(p1Row && p2Row && !p1Row.classList.contains('alert') && !p2Row.classList.contains('alert')), true);
+  const todayHead = grid && grid.querySelector('tr.section-today th');
+  const yestHead = grid && grid.querySelector('tr.section-yesterday th');
+  check('today section header comes first and includes date', !!(todayHead && todayHead.textContent.indexOf('TODAY (2026-11-12)') === 0 && todayHead.textContent.indexOf('patient') !== -1), true);
+  check('yesterday section header includes date', !!(yestHead && yestHead.textContent.indexOf('YESTERDAY (2026-11-11)') === 0), true);
+  const todayRows = grid ? [...grid.querySelectorAll('tr.day-today')] : [];
+  const yestRows = grid ? [...grid.querySelectorAll('tr.day-yesterday')] : [];
+  check('today has one row per patient', todayRows.length, 2);
+  check('yesterday has one row per patient', yestRows.length, 2);
+  check('patient with jobs on both days appears in both sections', todayRows.filter(r => r.textContent.indexOf(P1) !== -1).length === 1 && yestRows.filter(r => r.textContent.indexOf(P1) !== -1).length === 1, true);
+  const p1Today = todayRows.find(r => r.textContent.indexOf(P1) !== -1);
+  const p2Today = todayRows.find(r => r.textContent.indexOf(P2) !== -1);
+  const p1Yest = yestRows.find(r => r.textContent.indexOf(P1) !== -1);
+  const uLines = p1Today ? [...p1Today.querySelectorAll('.cell-line.unmatched')].map(c => c.textContent) : [];
+  const mLines = p1Today ? [...p1Today.querySelectorAll('.cell-line.matched')].map(c => c.textContent) : [];
+  check('P1 today unmatched is that day only', uLines.join(' | ').indexOf('CT HEAD') !== -1 && uLines.join(' | ').indexOf('MR BRAIN') === -1, true);
+  check('P1 yesterday unmatched is that day only', !!(p1Yest && p1Yest.textContent.indexOf('MR BRAIN') !== -1 && p1Yest.textContent.indexOf('CT HEAD') === -1), true);
+  check('P1 today matched uses template arrow short series', mLines, ['Head and Neck ← CT NECK']);
+  const todayTime = p1Today ? p1Today.querySelector('td.time').textContent.replace(/\s+/g, ' ').trim() : '';
+  check('P1 last submitted has Today badge and time', todayTime.indexOf('Today') !== -1 && todayTime.indexOf('13:51:51') !== -1, true);
+  check('today rows are not unmatched-only', !!(p1Today && p2Today && !p1Today.classList.contains('alert') && !p2Today.classList.contains('alert')), true);
+  check('yesterday unmatched-only rows use alert marker', !!(p1Yest && p1Yest.classList.contains('alert') && p1Yest.querySelector('.alert-mark')), true);
+  check('today row uses day-today class', !!(p1Today && p1Today.classList.contains('day-today')), true);
+  check('yesterday row uses day-yesterday class', !!(p1Yest && p1Yest.classList.contains('day-yesterday')), true);
   const foot = grid ? [...grid.querySelectorAll('tfoot td')].map(td => td.textContent) : [];
   check('totals row has patient and unmatched counts', foot[0].indexOf('2 patient') !== -1 && foot[1].indexOf('unmatched') !== -1, true);
+  check('panel is anchored bottom-right', host && host.style.bottom === '16px' && host.style.right === '16px' && (!host.style.top || host.style.top === 'auto'), true);
 
   // Clickable name: first/topmost page row for P1 is CT HEAD
   const pageDoc = window.document;
@@ -203,7 +249,7 @@ function loadApi(html) {
   });
   const firstJob = pageDoc.querySelector('#jobs tbody tr');
   const links = [...root.querySelectorAll('button.patient-link')];
-  check('each patient name is a button', links.length, 2);
+  check('each patient name is a button', links.length, 4);
   links[0].click();
   check('locate scrolls the first matching page row', window.__zclickScrolls[0] && window.__zclickScrolls[0].id, firstJob && firstJob.id);
   check('locate scroll uses block center', !!(window.__zclickScrolls[0] && window.__zclickScrolls[0].opts && window.__zclickScrolls[0].opts.block === 'center'), true);
@@ -231,9 +277,9 @@ function loadApi(html) {
   check('unmatched-only patient count', summary.groups[0] && summary.groups[0].matchedCount, 0);
   api.addPanel();
   const root = api.panelRoot();
-  const row = root && root.querySelector('table.grid tbody tr');
-  check('unmatched-only row is highlighted', !!(row && row.classList.contains('alert')), true);
-  check('unmatched-only table still one row per patient', root ? root.querySelectorAll('table.grid tbody tr').length : 0, 1);
+  const row = root && root.querySelector('table.grid tbody tr.alert');
+  check('unmatched-only row is highlighted', !!(row && row.classList.contains('alert') && row.querySelector('.alert-mark')), true);
+  check('unmatched-only table still one row per patient', root ? root.querySelectorAll('table.grid tr.day-today, table.grid tr.day-yesterday').length : 0, 1);
 }
 
 {
