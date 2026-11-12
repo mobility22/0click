@@ -11,10 +11,10 @@ function check(name, got, expected) {
   console.log((ok ? 'PASS' : 'FAIL') + ' ' + name + ' got ' + JSON.stringify(got) + ' expected ' + JSON.stringify(expected));
 }
 
-check('script @version 1.9', /@version\s+1\.9\b/.test(src), true);
-check('script SCRIPT_VERSION', /const SCRIPT_VERSION = '1\.9'/.test(src), true);
-check('script header comment 0click 1.9', /\/\/ 0click 1\.9\b/.test(src), true);
-check('script PANEL_TITLE', /const PANEL_TITLE = '0click 1\.9'/.test(src), true);
+check('script @version 1.10', /@version\s+1\.10\b/.test(src), true);
+check('script SCRIPT_VERSION', /const SCRIPT_VERSION = '1\.10'/.test(src), true);
+check('script header comment 0click 1.10', /\/\/ 0click 1\.10\b/.test(src), true);
+check('script PANEL_TITLE', /const PANEL_TITLE = '0click 1\.10'/.test(src), true);
 check('script has no ID copied toast text', src.indexOf('ID copied') === -1, true);
 check('script has no whole-row has-error class', src.indexOf('has-error') === -1, true);
 check('script @run-at document-start', /@run-at\s+document-start/.test(src), true);
@@ -177,13 +177,15 @@ function loadApi(html) {
   check('panel host light DOM has no patient text', light.indexOf(P1) === -1 && light.indexOf(P2) === -1, true);
   const root = api.panelRoot();
   check('panel uses closed shadow root', !!(root && root.mode === 'closed'), true);
-  check('panel title is 0click 1.9', !!(root && root.querySelector('.title') && root.querySelector('.title').textContent === '0click 1.9'), true);
+  check('panel title is 0click 1.10', !!(root && root.querySelector('.title') && root.querySelector('.title').textContent === '0click 1.10'), true);
   check('panel has refresh button', !!(root && root.querySelector('.refresh')), true);
   check('panel header has no date-range subtitle', !!(root && !root.querySelector('.range')), true);
   check('panel header has no source line', !!(root && !root.querySelector('.source')), true);
   check('panel header has no long note', !!(root && !root.querySelector('.note')), true);
-  const totalsText = root && root.querySelector('.totals') ? root.querySelector('.totals').textContent : '';
-  check('panel keeps the stats line', /\d+ patients? \u00b7 \d+ series \u00b7 \d+ matched \u00b7 \d+ unmatched/.test(totalsText), true);
+  const totalsEls = root ? [...root.querySelectorAll('.totals')] : [];
+  const totalsText = totalsEls[0] ? totalsEls[0].textContent : '';
+  check('panel has a single top stats line', totalsEls.length, 1);
+  check('top stats line is today only', totalsText, '2 patients \u00b7 3 series \u00b7 2 matched \u00b7 1 unmatched');
   check('default stats line has no error count', totalsText.indexOf('error') === -1 && !root.querySelector('.error-count'), true);
   const bodyText = root && root.querySelector('.body') ? root.querySelector('.body').textContent : '';
   check('panel lists first patient in shadow only', bodyText.indexOf(P1) !== -1, true);
@@ -275,8 +277,10 @@ function loadApi(html) {
   check('default yesterday unmatched-only is not an error row', !!(p1Yest && !p1Yest.classList.contains('has-error')), true);
   check('today row uses day-today class', !!(p1Today && p1Today.classList.contains('day-today')), true);
   check('yesterday row uses day-yesterday class', !!(p1Yest && p1Yest.classList.contains('day-yesterday')), true);
-  const foot = grid ? [...grid.querySelectorAll('tfoot td')].map(td => td.textContent) : [];
-  check('totals row has patient and unmatched counts', foot[0].indexOf('2 patient') !== -1 && foot[1].indexOf('unmatched') !== -1, true);
+  const foot = grid ? [...grid.querySelectorAll('tfoot td')].map(td => td.textContent.trim()) : [];
+  check('footer shows yesterday patient unmatched and matched counts', foot, ['2 patients', '2 unmatched', '0 matched', '']);
+  check('footer has no combined or today tally', foot.join(' ').indexOf('3 series') === -1 && foot.join(' ').indexOf('5 series') === -1 && foot.join(' ').indexOf('3 unmatched') === -1, true);
+  check('footer has no yesterday section header', !!(grid && grid.querySelector('tfoot') && grid.querySelector('tfoot').textContent.indexOf('YESTERDAY') === -1 && grid.querySelector('tfoot').textContent.indexOf('TODAY') === -1), true);
   check('panel is anchored bottom-right', host && host.style.bottom === '16px' && host.style.right === '16px' && (!host.style.top || host.style.top === 'auto'), true);
 
   // Clickable name: first/topmost page row for P1 is CT HEAD
@@ -377,9 +381,14 @@ function loadApi(html) {
   api.addPanel();
   const root = api.panelRoot();
   const totals = root && root.querySelector('.totals') ? root.querySelector('.totals').textContent : '';
-  const errSpan = root && root.querySelector('.error-count');
-  check('stats line appends red error count', !!(errSpan && errSpan.textContent === '4 errors' && /4 errors/.test(totals)), true);
+  const errSpan = root && root.querySelector('.totals .error-count');
+  check('top stats line is today only including today errors', totals, '2 patients \u00b7 4 series \u00b7 1 matched \u00b7 3 unmatched \u00b7 2 errors');
+  check('stats line appends red error count', !!(errSpan && errSpan.textContent === '2 errors' && /2 errors/.test(totals) && totals.indexOf('4 errors') === -1), true);
   check('error count is in a red error-count span', !!(errSpan && errSpan.classList.contains('error-count')), true);
+  const foot = root ? [...root.querySelectorAll('table.grid tfoot td')].map(td => td.textContent.trim()) : [];
+  const footErr = root && root.querySelector('table.grid tfoot .error-count');
+  check('footer shows yesterday counts and yesterday errors', foot, ['2 patients', '1 unmatched', '1 matched', '2 errors']);
+  check('footer yesterday errors are in a red error-count span', !!(footErr && footErr.classList.contains('error-count') && footErr.textContent === '2 errors'), true);
   const css = (root.querySelector('style') || {}).textContent || '';
   check('error CSS keeps red chips and count, not a whole-row tint', css.indexOf('has-error') === -1 && css.indexOf('status-chip') !== -1 && css.indexOf('.error-count') !== -1 && css.indexOf('#c62828') !== -1 && css.indexOf('#ffcdd2') === -1, true);
 

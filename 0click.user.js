@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         0click
 // @namespace    https://github.com/mobility22/0click
-// @version      1.9
+// @version      1.10
 // @description  Read-only AutoContour Zero-Click Jobs History summary
 // @match        http://10.240.61.81:18001/*
 // @updateURL    https://raw.githubusercontent.com/mobility22/0click/refs/heads/main/0click.user.js
@@ -12,13 +12,13 @@
 // @inject-into  page
 // ==/UserScript==
 
-// 0click 1.9 — AutoContour Zero-Click Jobs History summary (read-only)
+// 0click 1.10 — AutoContour Zero-Click Jobs History summary (read-only)
 
 (function () {
   'use strict';
   const TAG = '[0click]';
-  const SCRIPT_VERSION = '1.9';
-  const PANEL_TITLE = '0click 1.9';
+  const SCRIPT_VERSION = '1.10';
+  const PANEL_TITLE = '0click 1.10';
   const PANEL_ID = 'zclick-panel';
   const DEBOUNCE_MS = 250;
   const PAGE_SIZE = 500;
@@ -1246,6 +1246,23 @@
       tbody.appendChild(tr);
     }
   }
+  function fillStatsLine(target, summary) {
+    if (!target) return;
+    clearNode(target);
+    const n = summary || {};
+    const patients = n.patientCount || 0;
+    const errors = n.errorCount || 0;
+    target.appendChild(document.createTextNode(
+      patients + ' patient' + (patients === 1 ? '' : 's') +
+      ' · ' + (n.seriesCount || 0) + ' series · ' +
+      (n.matchedCount || 0) + ' matched · ' +
+      (n.unmatchedCount || 0) + ' unmatched'
+    ));
+    if (errors > 0) {
+      target.appendChild(document.createTextNode(' · '));
+      target.appendChild(el('span', 'error-count', errors + ' error' + (errors === 1 ? '' : 's')));
+    }
+  }
   function renderSummaryTable(body, rows, overall) {
     const today = summarizeDay(rows, 'today');
     const yesterday = summarizeDay(rows, 'yesterday');
@@ -1264,10 +1281,14 @@
     table.appendChild(tbody);
     const tfoot = el('tfoot');
     const fr = el('tr');
-    fr.appendChild(el('td', '', overall.patientCount + ' patient' + (overall.patientCount === 1 ? '' : 's')));
-    fr.appendChild(el('td', '', overall.unmatchedCount + ' unmatched'));
-    fr.appendChild(el('td', '', overall.matchedCount + ' matched'));
-    fr.appendChild(el('td', '', ''));
+    fr.appendChild(el('td', '', yesterday.patientCount + ' patient' + (yesterday.patientCount === 1 ? '' : 's')));
+    fr.appendChild(el('td', '', yesterday.unmatchedCount + ' unmatched'));
+    fr.appendChild(el('td', '', yesterday.matchedCount + ' matched'));
+    const errTd = el('td', '');
+    if ((yesterday.errorCount || 0) > 0) {
+      errTd.appendChild(el('span', 'error-count', yesterday.errorCount + ' error' + (yesterday.errorCount === 1 ? '' : 's')));
+    }
+    fr.appendChild(errTd);
     tfoot.appendChild(fr);
     table.appendChild(tfoot);
     body.appendChild(table);
@@ -1282,17 +1303,8 @@
     drainBuf();
     const info = getRowsAndSource();
     const summary = groupByPatient(info.rows);
-    clearNode(totalsEl);
-    totalsEl.appendChild(document.createTextNode(
-      summary.patientCount + ' patient' + (summary.patientCount === 1 ? '' : 's') +
-      ' · ' + summary.seriesCount + ' series · ' +
-      summary.matchedCount + ' matched · ' +
-      summary.unmatchedCount + ' unmatched'
-    ));
-    if (summary.errorCount > 0) {
-      totalsEl.appendChild(document.createTextNode(' · '));
-      totalsEl.appendChild(el('span', 'error-count', summary.errorCount + ' error' + (summary.errorCount === 1 ? '' : 's')));
-    }
+    const today = summarizeDay(info.rows, 'today');
+    fillStatsLine(totalsEl, today);
     totalsEl.title = sourceLabel(info);
     if (info.state === 'loading' && info.source !== 'api') {
       body.appendChild(el('div', 'empty', 'Loading the last two days from the jobs API…'));
@@ -1373,7 +1385,7 @@
       '.error-count { color: #c62828; font-weight: 800; }' +
       '.cell-line.series-error { color: #b71c1c; font-weight: 700; }' +
       '.status-chip { display: inline-block; margin-left: 5px; background: #c62828; color: #fff; font-size: 10px; font-weight: 800; line-height: 1.4; padding: 0 5px; border: 0; border-radius: 3px; vertical-align: middle; letter-spacing: .03em; font-family: inherit; cursor: pointer; }' +
-      'table.grid tfoot td { position: sticky; bottom: 0; background: #eceff1; font-weight: 700; box-shadow: 0 -1px 0 #cfd8dc; }' +
+      'table.grid tfoot td { position: sticky; bottom: 0; background: #eceff1; color: #546e7a; font-weight: 700; box-shadow: 0 -1px 0 #cfd8dc; }' +
       'td.patient-cell { font-weight: 600; white-space: nowrap; }' +
       'button.patient-link { background: none; border: 0; padding: 0; font: inherit; font-weight: 600; color: #0d47a1; text-decoration: underline; cursor: pointer; }' +
       'td.time { white-space: nowrap; color: #333; }' +
