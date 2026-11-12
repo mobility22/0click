@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         0click
 // @namespace    https://github.com/mobility22/0click
-// @version      1.10
+// @version      1.11
 // @description  Read-only AutoContour Zero-Click Jobs History summary
 // @match        http://10.240.61.81:18001/*
 // @updateURL    https://raw.githubusercontent.com/mobility22/0click/refs/heads/main/0click.user.js
@@ -12,13 +12,13 @@
 // @inject-into  page
 // ==/UserScript==
 
-// 0click 1.10 — AutoContour Zero-Click Jobs History summary (read-only)
+// 0click 1.11 — AutoContour Zero-Click Jobs History summary (read-only)
 
 (function () {
   'use strict';
   const TAG = '[0click]';
-  const SCRIPT_VERSION = '1.10';
-  const PANEL_TITLE = '0click 1.10';
+  const SCRIPT_VERSION = '1.11';
+  const PANEL_TITLE = '0click 1.11';
   const PANEL_ID = 'zclick-panel';
   const DEBOUNCE_MS = 250;
   const PAGE_SIZE = 500;
@@ -1053,6 +1053,15 @@
     if (!id || !/^[A-Za-z0-9$_-]+$/.test(id)) return '';
     return id;
   }
+  // Visible label only: strip a trailing valid (ID). Grouping still uses the full string.
+  function displayPatientName(patient) {
+    const text = patient == null ? '' : String(patient).trim();
+    if (!text) return '';
+    if (!extractPatientId(text)) return text;
+    const open = text.lastIndexOf('(');
+    const name = open >= 0 ? text.slice(0, open).trim() : text;
+    return name;
+  }
   function tryGmSetClipboard(text) {
     try {
       if (typeof GM_setClipboard === 'function') {
@@ -1217,8 +1226,10 @@
         ptd.appendChild(mark);
         ptd.appendChild(document.createTextNode(' '));
       }
-      const btn = el('button', 'patient-link', g.patient);
+      const name = displayPatientName(g.patient) || '';
+      const btn = el('button', 'patient-link', name);
       btn.type = 'button';
+      if (name) btn.title = name;
       btn.addEventListener('click', ev => {
         ev.preventDefault();
         ev.stopPropagation();
@@ -1269,7 +1280,7 @@
     const table = el('table', 'grid');
     const thead = el('thead');
     const hr = el('tr');
-    hr.appendChild(el('th', '', 'Patient'));
+    hr.appendChild(el('th', 'patient-col', 'Patient'));
     hr.appendChild(el('th', '', 'Unmatched (' + overall.unmatchedCount + ')'));
     hr.appendChild(el('th', '', 'Matched'));
     hr.appendChild(el('th', '', 'Last submitted'));
@@ -1386,8 +1397,9 @@
       '.cell-line.series-error { color: #b71c1c; font-weight: 700; }' +
       '.status-chip { display: inline-block; margin-left: 5px; background: #c62828; color: #fff; font-size: 10px; font-weight: 800; line-height: 1.4; padding: 0 5px; border: 0; border-radius: 3px; vertical-align: middle; letter-spacing: .03em; font-family: inherit; cursor: pointer; }' +
       'table.grid tfoot td { position: sticky; bottom: 0; background: #eceff1; color: #546e7a; font-weight: 700; box-shadow: 0 -1px 0 #cfd8dc; }' +
-      'td.patient-cell { font-weight: 600; white-space: nowrap; }' +
-      'button.patient-link { background: none; border: 0; padding: 0; font: inherit; font-weight: 600; color: #0d47a1; text-decoration: underline; cursor: pointer; }' +
+      'th.patient-col, td.patient-cell { width: 9em; max-width: 9em; box-sizing: border-box; }' +
+      'td.patient-cell { font-weight: 600; white-space: nowrap; overflow: hidden; }' +
+      'button.patient-link { background: none; border: 0; padding: 0; font: inherit; font-weight: 600; color: #0d47a1; text-decoration: underline; cursor: pointer; display: inline-block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: middle; text-align: left; }' +
       'td.time { white-space: nowrap; color: #333; }' +
       '.alert-mark { display: inline-block; margin-right: 4px; background: #ef6c00; color: #fff; font-weight: 800; font-size: 10px; line-height: 1.4; padding: 0 5px; border-radius: 3px; vertical-align: middle; }' +
       '.locate-note { display: none; padding: 4px 10px; font-size: 11px; color: #b71c1c; flex: 0 0 auto; }' +
@@ -1463,7 +1475,7 @@
       parsePhasePercent, firstSeriesToken, compactPhaseList, phaseLineLabel, consolidateSeriesLines,
       dayKind, summarizeDay, rowsForDay, MAX_CELL_LINES,
       collectDomJobRows, findPatientDomRow, locatePatient, highlightDomRow, setLocateNote, FLASH_MS,
-      extractPatientId, copyPatientId, writeClipboard, locateNotes,
+      extractPatientId, displayPatientName, copyPatientId, writeClipboard, locateNotes,
       isProblemStatus, countErrorSeries, errorSeriesLines, statusLabel,
       findErrorDomRow, locateErrorSeries, sameStatus,
       setApiRowsForTest: (rows, path) => { apiRows = rows; apiPath = path || '/api/jobs'; apiState = rows ? 'api' : 'idle'; lastJobsUrl = path || lastJobsUrl; },

@@ -11,10 +11,10 @@ function check(name, got, expected) {
   console.log((ok ? 'PASS' : 'FAIL') + ' ' + name + ' got ' + JSON.stringify(got) + ' expected ' + JSON.stringify(expected));
 }
 
-check('script @version 1.10', /@version\s+1\.10\b/.test(src), true);
-check('script SCRIPT_VERSION', /const SCRIPT_VERSION = '1\.10'/.test(src), true);
-check('script header comment 0click 1.10', /\/\/ 0click 1\.10\b/.test(src), true);
-check('script PANEL_TITLE', /const PANEL_TITLE = '0click 1\.10'/.test(src), true);
+check('script @version 1.11', /@version\s+1\.11\b/.test(src), true);
+check('script SCRIPT_VERSION', /const SCRIPT_VERSION = '1\.11'/.test(src), true);
+check('script header comment 0click 1.11', /\/\/ 0click 1\.11\b/.test(src), true);
+check('script PANEL_TITLE', /const PANEL_TITLE = '0click 1\.11'/.test(src), true);
 check('script has no ID copied toast text', src.indexOf('ID copied') === -1, true);
 check('script has no whole-row has-error class', src.indexOf('has-error') === -1, true);
 check('script @run-at document-start', /@run-at\s+document-start/.test(src), true);
@@ -57,7 +57,9 @@ const { JSDOM } = jsdom;
 
 // Placeholder names only — never use real patient data in tests.
 const P1 = 'DOE, JANE (000000)';
+const P1_NAME = 'DOE, JANE';
 const P2 = 'SMITH, JOHN (111111)';
+const P2_NAME = 'SMITH, JOHN';
 const NOW = new Date(2026, 10, 12, 15, 0, 0); // local 2026-11-12
 
 function jobsTableHtml() {
@@ -124,6 +126,12 @@ function loadApi(html) {
   check('extract ID rejects missing parens', api.extractPatientId('DOE, JANE'), '');
   check('extract ID rejects invalid characters', api.extractPatientId('DOE, JANE (00 00!)'), '');
   check('extract ID rejects empty parens', api.extractPatientId('DOE, JANE (   )'), '');
+  check('display name strips trailing ID', api.displayPatientName('DOE, JANE (000000)'), 'DOE, JANE');
+  check('display name keeps earlier nickname parens', api.displayPatientName('DOE (NICK), JANE (AB-12_3$)'), 'DOE (NICK), JANE');
+  check('display name trims around ID', api.displayPatientName('DOE, JANE (  FAKE-1_2$  )'), 'DOE, JANE');
+  check('display name without parens is unchanged', api.displayPatientName('DOE, JANE'), 'DOE, JANE');
+  check('display name keeps invalid trailing parens', api.displayPatientName('DOE, JANE (00 00!)'), 'DOE, JANE (00 00!)');
+  check('display name keeps empty parens', api.displayPatientName('DOE, JANE (   )'), 'DOE, JANE (   )');
 
   check('isRosWorkflow other', api.isRosWorkflow('Other_Workflow'), false);
   check('isMatchedTemplate name', api.isMatchedTemplate('Head and Neck'), true);
@@ -164,6 +172,12 @@ function loadApi(html) {
   check('first matched template', summary.groups[0].matched.map(r => r.template), ['Head and Neck']);
   check('second patient unmatched series', summary.groups[1].unmatched.map(r => r.series), ['MR PELVIS']);
   check('second patient matched series', summary.groups[1].matched.map(r => r.series), ['CT PELVIS']);
+  const sameName = api.groupByPatient([
+    { patient: 'DOE, JANE (000000)', workflow: 'KP_ROS', template: '-', series: 'CT A', submitted: '2026-11-12 10:00:00' },
+    { patient: 'DOE, JANE (111111)', workflow: 'KP_ROS', template: '-', series: 'CT B', submitted: '2026-11-12 11:00:00' }
+  ], NOW);
+  check('same display name different IDs stay two groups', sameName.patientCount, 2);
+  check('groups keep the full original patient strings', sameName.groups.map(g => g.patient), ['DOE, JANE (000000)', 'DOE, JANE (111111)']);
 
   const logs = [];
   const origLog = window.console.log;
@@ -174,10 +188,10 @@ function loadApi(html) {
   api.addPanel();
   const host = window.document.getElementById(api.PANEL_ID);
   const light = host ? (host.textContent || host.innerHTML || '') : 'MISSING_PANEL';
-  check('panel host light DOM has no patient text', light.indexOf(P1) === -1 && light.indexOf(P2) === -1, true);
+  check('panel host light DOM has no patient text', light.indexOf(P1_NAME) === -1 && light.indexOf(P2_NAME) === -1 && light.indexOf(P1) === -1 && light.indexOf(P2) === -1, true);
   const root = api.panelRoot();
   check('panel uses closed shadow root', !!(root && root.mode === 'closed'), true);
-  check('panel title is 0click 1.10', !!(root && root.querySelector('.title') && root.querySelector('.title').textContent === '0click 1.10'), true);
+  check('panel title is 0click 1.11', !!(root && root.querySelector('.title') && root.querySelector('.title').textContent === '0click 1.11'), true);
   check('panel has refresh button', !!(root && root.querySelector('.refresh')), true);
   check('panel header has no date-range subtitle', !!(root && !root.querySelector('.range')), true);
   check('panel header has no source line', !!(root && !root.querySelector('.source')), true);
@@ -188,7 +202,8 @@ function loadApi(html) {
   check('top stats line is today only', totalsText, '2 patients \u00b7 3 series \u00b7 2 matched \u00b7 1 unmatched');
   check('default stats line has no error count', totalsText.indexOf('error') === -1 && !root.querySelector('.error-count'), true);
   const bodyText = root && root.querySelector('.body') ? root.querySelector('.body').textContent : '';
-  check('panel lists first patient in shadow only', bodyText.indexOf(P1) !== -1, true);
+  check('panel lists first patient name in shadow only', bodyText.indexOf(P1_NAME) !== -1, true);
+  check('panel does not show patient IDs', bodyText.indexOf('000000') === -1 && bodyText.indexOf('111111') === -1 && bodyText.indexOf(P1) === -1 && bodyText.indexOf(P2) === -1, true);
   const grid = root && root.querySelector('table.grid');
   check('panel uses a summary table', !!grid, true);
   const heads = grid ? [...grid.querySelectorAll('thead th')].map(th => th.textContent) : [];
@@ -258,10 +273,10 @@ function loadApi(html) {
   check('optional divider is on the first yesterday row only', !!(yestRows[0] && yestRows[0].classList.contains('day-split') && !yestRows[1].classList.contains('day-split') && todayRows.every(r => !r.classList.contains('day-split'))), true);
   check('today has one row per patient', todayRows.length, 2);
   check('yesterday has one row per patient', yestRows.length, 2);
-  check('patient with jobs on both days appears in both sections', todayRows.filter(r => r.textContent.indexOf(P1) !== -1).length === 1 && yestRows.filter(r => r.textContent.indexOf(P1) !== -1).length === 1, true);
-  const p1Today = todayRows.find(r => r.textContent.indexOf(P1) !== -1);
-  const p2Today = todayRows.find(r => r.textContent.indexOf(P2) !== -1);
-  const p1Yest = yestRows.find(r => r.textContent.indexOf(P1) !== -1);
+  check('patient with jobs on both days appears in both sections', todayRows.filter(r => r.textContent.indexOf(P1_NAME) !== -1).length === 1 && yestRows.filter(r => r.textContent.indexOf(P1_NAME) !== -1).length === 1, true);
+  const p1Today = todayRows.find(r => r.textContent.indexOf(P1_NAME) !== -1);
+  const p2Today = todayRows.find(r => r.textContent.indexOf(P2_NAME) !== -1);
+  const p1Yest = yestRows.find(r => r.textContent.indexOf(P1_NAME) !== -1);
   const uLines = p1Today ? [...p1Today.querySelectorAll('.cell-line.unmatched')].map(c => c.textContent) : [];
   const mLines = p1Today ? [...p1Today.querySelectorAll('.cell-line.matched')].map(c => c.textContent) : [];
   check('P1 today unmatched is that day only', uLines.join(' | ').indexOf('CT HEAD') !== -1 && uLines.join(' | ').indexOf('MR BRAIN') === -1, true);
@@ -293,6 +308,10 @@ function loadApi(html) {
   const matchedJob = pageDoc.querySelector('#job-row-1');
   const links = [...root.querySelectorAll('button.patient-link')];
   check('each patient name is a button', links.length, 4);
+  check('patient buttons show name only', links.map(b => b.textContent), [P1_NAME, P2_NAME, P1_NAME, P2_NAME]);
+  check('patient button titles are the name without IDs', links.map(b => b.title), [P1_NAME, P2_NAME, P1_NAME, P2_NAME]);
+  check('patient cells and titles do not include IDs', links.every(b => b.textContent.indexOf('(') === -1 && b.title.indexOf('000000') === -1 && b.title.indexOf('111111') === -1 && b.title.indexOf('(') === -1), true);
+  check('patient column CSS is narrow with ellipsis', panelCss.indexOf('th.patient-col') !== -1 && panelCss.indexOf('max-width: 9em') !== -1 && panelCss.indexOf('text-overflow: ellipsis') !== -1 && /td\.patient-cell/.test(panelCss), true);
   links[0].click();
   check('locate prefers the first matched series row', window.__zclickScrolls[0] && window.__zclickScrolls[0].id, matchedJob && matchedJob.id);
   check('locate does not use the unmatched row first', window.__zclickScrolls[0] && window.__zclickScrolls[0].id !== (firstJob && firstJob.id), true);
@@ -363,7 +382,9 @@ function loadApi(html) {
 {
   // Fake statuses and placeholder names only.
   const P_ERR = 'ROE, ANN (333333)';
+  const P_ERR_NAME = 'ROE, ANN';
   const P_ONLY = 'LEE, FAKE (444444)';
+  const P_ONLY_NAME = 'LEE, FAKE';
   const html = '<table id="errs">' +
     '<thead><tr><th>Status</th><th>Template</th><th>Patient</th><th>Workflow</th><th>Series Description</th><th>Date Submitted</th></tr></thead>' +
     '<tbody>' +
@@ -394,11 +415,13 @@ function loadApi(html) {
 
   const todayRows = [...root.querySelectorAll('tr.day-today')];
   const yestRows = [...root.querySelectorAll('tr.day-yesterday')];
-  const errToday = todayRows.find(tr => tr.textContent.indexOf(P_ERR) !== -1);
-  const onlyToday = todayRows.find(tr => tr.textContent.indexOf(P_ONLY) !== -1);
-  const errYest = yestRows.find(tr => tr.textContent.indexOf(P_ERR) !== -1);
-  const onlyYest = yestRows.find(tr => tr.textContent.indexOf(P_ONLY) !== -1);
+  const errToday = todayRows.find(tr => tr.textContent.indexOf(P_ERR_NAME) !== -1);
+  const onlyToday = todayRows.find(tr => tr.textContent.indexOf(P_ONLY_NAME) !== -1);
+  const errYest = yestRows.find(tr => tr.textContent.indexOf(P_ERR_NAME) !== -1);
+  const onlyYest = yestRows.find(tr => tr.textContent.indexOf(P_ONLY_NAME) !== -1);
 
+  check('error fixture panel shows names without IDs', !!(errToday && onlyToday && errYest && onlyYest) && [errToday, onlyToday, errYest, onlyYest].every(tr => tr.textContent.indexOf('333333') === -1 && tr.textContent.indexOf('444444') === -1), true);
+  check('error fixture button titles have no IDs', [errToday, onlyToday, errYest, onlyYest].every(tr => { const b = tr && tr.querySelector('button.patient-link'); return b && b.textContent.indexOf('(') === -1 && b.title.indexOf('(') === -1; }), true);
   check('patient with a matched series and an error is not unmatched-only', !!(errToday && errToday.classList.contains('day-today') && !errToday.classList.contains('alert') && !errToday.classList.contains('has-error')), true);
   check('unmatched-only error row keeps the orange marker, not a red row', !!(onlyToday && onlyToday.classList.contains('alert') && !onlyToday.classList.contains('has-error') && onlyToday.querySelector('.alert-mark')), true);
   check('yesterday cancelled matched series keeps the day tint, not a red row', !!(errYest && errYest.classList.contains('day-yesterday') && !errYest.classList.contains('has-error') && !errYest.classList.contains('alert')), true);
@@ -596,7 +619,8 @@ function loadApi(html) {
     check('panel source tooltip shows GET path', srcTip.indexOf('GET /api/jobs') !== -1, true);
     check('API panel has no source line in the header', !!(root && !root.querySelector('.source')), true);
     const bodyText = root && root.querySelector('.body') ? root.querySelector('.body').textContent : '';
-    check('API panel lists both placeholder patients', bodyText.indexOf(P1) !== -1 && bodyText.indexOf(P2) !== -1, true);
+    check('API panel lists both placeholder patients', bodyText.indexOf(P1_NAME) !== -1 && bodyText.indexOf(P2_NAME) !== -1, true);
+  check('API panel does not show patient IDs', bodyText.indexOf('000000') === -1 && bodyText.indexOf('111111') === -1, true);
     check('API panel does not use visible-only DOM series', bodyText.indexOf('VISIBLE ONLY') === -1, true);
 
     const logs = [];
