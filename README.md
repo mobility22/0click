@@ -14,7 +14,7 @@ In Tampermonkey, choose Install from URL and paste that link, or open it after T
 
 A floating **0click 1.2** panel summarizes jobs from **today and yesterday** (the browser's local date). The date range is shown in the panel header.
 
-- Only rows whose Workflow contains `ROS` (for example `KP_ROS`) are included.
+- Only rows matching the configured workflow filter are included.
 - Only rows whose Date Submitted falls on today or yesterday are included. Date Submitted is parsed as `YYYY-MM-DD HH:MM:SS` (other similar date forms are also accepted).
 - The panel is a compact table with **one row per patient** and these columns:
   - **Patient**
