@@ -1,22 +1,23 @@
 // ==UserScript==
 // @name         0click
 // @namespace    https://github.com/mobility22/0click
-// @version      1.3
+// @version      1.4
 // @description  Read-only AutoContour Zero-Click Jobs History summary
 // @match        http://10.240.61.81:18001/*
 // @updateURL    https://raw.githubusercontent.com/mobility22/0click/refs/heads/main/0click.user.js
 // @downloadURL  https://raw.githubusercontent.com/mobility22/0click/refs/heads/main/0click.user.js
 // @run-at       document-start
 // @grant        unsafeWindow
+// @inject-into  page
 // ==/UserScript==
 
-// 0click 1.3 — AutoContour Zero-Click Jobs History summary (read-only)
+// 0click 1.4 — AutoContour Zero-Click Jobs History summary (read-only)
 
 (function () {
   'use strict';
   const TAG = '[0click]';
-  const SCRIPT_VERSION = '1.3';
-  const PANEL_TITLE = '0click 1.3';
+  const SCRIPT_VERSION = '1.4';
+  const PANEL_TITLE = '0click 1.4';
   const PANEL_ID = 'zclick-panel';
   const DEBOUNCE_MS = 250;
   const PAGE_SIZE = 500;
@@ -516,6 +517,7 @@
   let apiState = 'idle';
   let expanding = false;
   let expandTimer = null;
+  let drainTimer = null;
   let customGetJson = null;
 
   function isSelfUrl(href) {
@@ -643,7 +645,11 @@
     };
     wrapped.__zclick = true;
     try { Object.defineProperty(wrapped, 'name', { value: 'fetch' }); } catch (e) { /* ignore */ }
-    win.fetch = wrapped;
+    try {
+      Object.defineProperty(win, 'fetch', { configurable: true, enumerable: true, writable: true, value: wrapped });
+    } catch (e) {
+      try { win.fetch = wrapped; } catch (e2) { /* page may lock fetch */ }
+    }
   }
   function hookXhr(win) {
     if (!win || !win.XMLHttpRequest || !win.XMLHttpRequest.prototype) return;
@@ -765,6 +771,10 @@
     hookNetwork(window);
     try { hookNetwork(pageWin()); } catch (e) { /* ignore */ }
     injectPageHook();
+    try {
+      window.addEventListener('zclick-api', drainBuf);
+    } catch (e) { /* ignore */ }
+    if (!drainTimer) drainTimer = setInterval(drainBuf, 400);
   }
   function resetApiState() {
     selfFetches = new Set();
@@ -876,12 +886,9 @@
     }
     return out;
   }
-  function findPatientDomRow(group) {
-    const name = norm(group && group.patient);
-    if (!name) return null;
-    const items = ((group && group.matched) || []).concat((group && group.unmatched) || []);
-    const seriesSet = new Set(items.map(r => norm(r.series)).filter(Boolean));
-    const dateSet = new Set(items.map(r => norm(r.submitted)).filter(Boolean));
+  function findDomRowFor(name, wanted) {
+    const seriesSet = new Set((wanted || []).map(r => norm(r.series)).filter(Boolean));
+    const dateSet = new Set((wanted || []).map(r => norm(r.submitted)).filter(Boolean));
     let fallback = null;
     for (const item of collectDomJobRows()) {
       const rec = item && item.rec, el = item && item.el;
@@ -891,7 +898,18 @@
         return el;
       }
     }
-    return fallback;
+    return wanted && wanted.length ? null : fallback;
+  }
+  function findPatientDomRow(group) {
+    const name = norm(group && group.patient);
+    if (!name) return null;
+    const matched = (group && group.matched) || [];
+    const unmatched = (group && group.unmatched) || [];
+    if (matched.length) {
+      const hit = findDomRowFor(name, matched);
+      if (hit) return hit;
+    }
+    return findDomRowFor(name, unmatched.concat(matched)) || findDomRowFor(name, []);
   }
   const FLASH_MS = 2000;
   let flashTimer = null, flashEl = null, flashPrev = null;
@@ -1119,20 +1137,17 @@
     if (!root) return;
     const body = root.querySelector('.body');
     const totalsEl = root.querySelector('.totals');
-    const rangeEl = root.querySelector('.range');
-    const sourceEl = root.querySelector('.source');
     if (!body || !totalsEl) return;
     clearNode(body);
     drainBuf();
     const info = getRowsAndSource();
     const summary = groupByPatient(info.rows);
-    if (rangeEl) rangeEl.textContent = summary.rangeLabel;
-    if (sourceEl) sourceEl.textContent = sourceLabel(info);
     totalsEl.textContent =
       summary.patientCount + ' patient' + (summary.patientCount === 1 ? '' : 's') +
       ' · ' + summary.seriesCount + ' series · ' +
       summary.matchedCount + ' matched · ' +
       summary.unmatchedCount + ' unmatched';
+    totalsEl.title = sourceLabel(info);
     if (info.state === 'loading' && info.source !== 'api') {
       body.appendChild(el('div', 'empty', 'Loading the last two days from the jobs API…'));
     } else if (info.source !== 'api' && !summary.tableCount) {
@@ -1193,13 +1208,10 @@
       '.bar { display: flex; align-items: center; gap: 6px; padding: 8px 10px; background: #1565c0; color: #fff; flex: 0 0 auto; }' +
       '.head { flex: 1; min-width: 0; }' +
       '.title { font-weight: bold; font-size: 15px; }' +
-      '.range { font-size: 11px; opacity: .95; margin-top: 1px; }' +
       '.bar button { font-size: 12px; padding: 3px 8px; border: 0; border-radius: 4px; background: #fff; color: #1565c0; font-weight: bold; cursor: pointer; }' +
-      '.totals { padding: 6px 10px 2px; font-size: 12px; color: #333; flex: 0 0 auto; }' +
-      '.source { padding: 0 10px 4px; font-size: 11px; color: #444; flex: 0 0 auto; }' +
-      '.note { padding: 0 10px 6px; font-size: 11px; color: #555; flex: 0 0 auto; }' +
+      '.totals { padding: 6px 10px 6px; font-size: 12px; color: #333; flex: 0 0 auto; }' +
       '.body { padding: 0 0 0; overflow: auto; flex: 1 1 auto; min-height: 0; border-top: 1px solid #e0e0e0; }' +
-      '.wrap.collapsed .totals, .wrap.collapsed .source, .wrap.collapsed .note, .wrap.collapsed .locate-note, .wrap.collapsed .body { display: none; }' +
+      '.wrap.collapsed .totals, .wrap.collapsed .locate-note, .wrap.collapsed .body { display: none; }' +
       '.wrap.collapsed { height: auto; }' +
       '.empty { color: #555; font-style: italic; margin: 8px 10px; }' +
       'table.grid { width: 100%; border-collapse: collapse; table-layout: auto; }' +
@@ -1228,13 +1240,11 @@
       '</style>' +
       '<div class="wrap">' +
       '<div class="bar">' +
-      '<div class="head"><div class="title"></div><div class="range"></div></div>' +
+      '<div class="head"><div class="title"></div></div>' +
       '<button class="refresh" type="button">Refresh</button>' +
       '<button class="toggle" type="button">Hide</button>' +
       '</div>' +
       '<div class="totals"></div>' +
-      '<div class="source"></div>' +
-      '<div class="note">Read-only. Prefers the same-origin jobs API (GET only) so the summary is not limited by the page column filters. Falls back to the visible table if the API is not detected. Includes today and yesterday (local date). Never changes page filters or clicks pagination. Click a patient name to scroll to that row in the page table (highlight only; no page clicks).</div>' +
       '<div class="locate-note"></div>' +
       '<div class="body"></div>' +
       '</div>';

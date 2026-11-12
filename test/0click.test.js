@@ -11,11 +11,12 @@ function check(name, got, expected) {
   console.log((ok ? 'PASS' : 'FAIL') + ' ' + name + ' got ' + JSON.stringify(got) + ' expected ' + JSON.stringify(expected));
 }
 
-check('script @version 1.3', /@version\s+1\.3\b/.test(src), true);
-check('script SCRIPT_VERSION', /const SCRIPT_VERSION = '1\.3'/.test(src), true);
-check('script header comment 0click 1.3', /\/\/ 0click 1\.3\b/.test(src), true);
-check('script PANEL_TITLE', /const PANEL_TITLE = '0click 1\.3'/.test(src), true);
+check('script @version 1.4', /@version\s+1\.4\b/.test(src), true);
+check('script SCRIPT_VERSION', /const SCRIPT_VERSION = '1\.4'/.test(src), true);
+check('script header comment 0click 1.4', /\/\/ 0click 1\.4\b/.test(src), true);
+check('script PANEL_TITLE', /const PANEL_TITLE = '0click 1\.4'/.test(src), true);
 check('script @run-at document-start', /@run-at\s+document-start/.test(src), true);
+check('script @inject-into page', /@inject-into\s+page/.test(src), true);
 check('script closed shadow', src.includes("attachShadow({ mode: 'closed' })"), true);
 check('script @downloadURL raw main', src.includes('https://raw.githubusercontent.com/mobility22/0click/refs/heads/main/0click.user.js'), true);
 check('script @match Zero-Click host', src.includes('@match        http://10.240.61.81:18001/*'), true);
@@ -151,9 +152,13 @@ function loadApi(html) {
   check('panel host light DOM has no patient text', light.indexOf(P1) === -1 && light.indexOf(P2) === -1, true);
   const root = api.panelRoot();
   check('panel uses closed shadow root', !!(root && root.mode === 'closed'), true);
-  check('panel title is 0click 1.3', !!(root && root.querySelector('.title') && root.querySelector('.title').textContent === '0click 1.3'), true);
+  check('panel title is 0click 1.4', !!(root && root.querySelector('.title') && root.querySelector('.title').textContent === '0click 1.4'), true);
   check('panel has refresh button', !!(root && root.querySelector('.refresh')), true);
-  check('panel header shows date range', !!(root && root.querySelector('.range') && root.querySelector('.range').textContent === '2026-11-11 \u2013 2026-11-12'), true);
+  check('panel header has no date-range subtitle', !!(root && !root.querySelector('.range')), true);
+  check('panel header has no source line', !!(root && !root.querySelector('.source')), true);
+  check('panel header has no long note', !!(root && !root.querySelector('.note')), true);
+  const totalsText = root && root.querySelector('.totals') ? root.querySelector('.totals').textContent : '';
+  check('panel keeps the stats line', /\d+ patients? \u00b7 \d+ series \u00b7 \d+ matched \u00b7 \d+ unmatched/.test(totalsText), true);
   const bodyText = root && root.querySelector('.body') ? root.querySelector('.body').textContent : '';
   check('panel lists first patient in shadow only', bodyText.indexOf(P1) !== -1, true);
   const grid = root && root.querySelector('table.grid');
@@ -248,16 +253,24 @@ function loadApi(html) {
     row.addEventListener('click', () => { window.__zclickPageClicks.push(row.id); });
   });
   const firstJob = pageDoc.querySelector('#jobs tbody tr');
+  const matchedJob = pageDoc.querySelector('#job-row-1');
   const links = [...root.querySelectorAll('button.patient-link')];
   check('each patient name is a button', links.length, 4);
   links[0].click();
-  check('locate scrolls the first matching page row', window.__zclickScrolls[0] && window.__zclickScrolls[0].id, firstJob && firstJob.id);
+  check('locate prefers the first matched series row', window.__zclickScrolls[0] && window.__zclickScrolls[0].id, matchedJob && matchedJob.id);
+  check('locate does not use the unmatched row first', window.__zclickScrolls[0] && window.__zclickScrolls[0].id !== (firstJob && firstJob.id), true);
   check('locate scroll uses block center', !!(window.__zclickScrolls[0] && window.__zclickScrolls[0].opts && window.__zclickScrolls[0].opts.block === 'center'), true);
-  const outline = firstJob ? String(firstJob.style.outline || '') : '';
-  const bg = firstJob ? String(firstJob.style.backgroundColor || '') : '';
+  const outline = matchedJob ? String(matchedJob.style.outline || '') : '';
+  const bg = matchedJob ? String(matchedJob.style.backgroundColor || '') : '';
   check('located row is highlighted', /3px/.test(outline) && (outline.indexOf('1565c0') !== -1 || /rgb\( *21, *101, *192 *\)/.test(outline) || /rgb\( *255, *245, *157 *\)/.test(bg) || bg.indexOf('fff59d') !== -1 || bg.length > 0), true);
   check('locate does not click the page row', window.__zclickPageClicks.length, 0);
   check('locate note hidden when row is found', (root.querySelector('.locate-note') || {}).textContent || '', '');
+
+  const yesterdayP1 = { patient: P1, matched: [], unmatched: [{ series: 'MR BRAIN', submitted: '2026-11-11 09:00:00' }] };
+  window.__zclickScrolls = [];
+  const yestOk = api.locatePatient(yesterdayP1);
+  const yestRow = pageDoc.querySelector('#job-row-2');
+  check('unmatched-only locate uses the first series row', !!(yestOk && window.__zclickScrolls[0] && window.__zclickScrolls[0].id === (yestRow && yestRow.id)), true);
 
   const missingGroup = { patient: 'BROWN, PAT (222222)', matched: [], unmatched: [{ series: 'CT OTHER', submitted: '2026-11-12 10:00:00' }] };
   const missingOk = api.locatePatient(missingGroup);
@@ -418,8 +431,10 @@ function loadApi(html) {
     check('API summary includes both days', summary.seriesCount, 2);
     api.addPanel();
     const root = api.panelRoot();
-    const srcLine = root && root.querySelector('.source') ? root.querySelector('.source').textContent : '';
-    check('panel source shows GET path', srcLine.indexOf('GET /api/jobs') !== -1, true);
+    const totalsEl = root && root.querySelector('.totals');
+    const srcTip = totalsEl ? String(totalsEl.title || '') : '';
+    check('panel source tooltip shows GET path', srcTip.indexOf('GET /api/jobs') !== -1, true);
+    check('API panel has no source line in the header', !!(root && !root.querySelector('.source')), true);
     const bodyText = root && root.querySelector('.body') ? root.querySelector('.body').textContent : '';
     check('API panel lists both placeholder patients', bodyText.indexOf(P1) !== -1 && bodyText.indexOf(P2) !== -1, true);
     check('API panel does not use visible-only DOM series', bodyText.indexOf('VISIBLE ONLY') === -1, true);
