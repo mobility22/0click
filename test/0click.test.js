@@ -11,10 +11,10 @@ function check(name, got, expected) {
   console.log((ok ? 'PASS' : 'FAIL') + ' ' + name + ' got ' + JSON.stringify(got) + ' expected ' + JSON.stringify(expected));
 }
 
-check('script @version 1.5', /@version\s+1\.5\b/.test(src), true);
-check('script SCRIPT_VERSION', /const SCRIPT_VERSION = '1\.5'/.test(src), true);
-check('script header comment 0click 1.5', /\/\/ 0click 1\.5\b/.test(src), true);
-check('script PANEL_TITLE', /const PANEL_TITLE = '0click 1\.5'/.test(src), true);
+check('script @version 1.6', /@version\s+1\.6\b/.test(src), true);
+check('script SCRIPT_VERSION', /const SCRIPT_VERSION = '1\.6'/.test(src), true);
+check('script header comment 0click 1.6', /\/\/ 0click 1\.6\b/.test(src), true);
+check('script PANEL_TITLE', /const PANEL_TITLE = '0click 1\.6'/.test(src), true);
 check('script @run-at document-start', /@run-at\s+document-start/.test(src), true);
 check('script @inject-into page', /@inject-into\s+page/.test(src), true);
 check('script @grant GM_setClipboard', /@grant\s+GM_setClipboard/.test(src), true);
@@ -175,7 +175,7 @@ function loadApi(html) {
   check('panel host light DOM has no patient text', light.indexOf(P1) === -1 && light.indexOf(P2) === -1, true);
   const root = api.panelRoot();
   check('panel uses closed shadow root', !!(root && root.mode === 'closed'), true);
-  check('panel title is 0click 1.5', !!(root && root.querySelector('.title') && root.querySelector('.title').textContent === '0click 1.5'), true);
+  check('panel title is 0click 1.6', !!(root && root.querySelector('.title') && root.querySelector('.title').textContent === '0click 1.6'), true);
   check('panel has refresh button', !!(root && root.querySelector('.refresh')), true);
   check('panel header has no date-range subtitle', !!(root && !root.querySelector('.range')), true);
   check('panel header has no source line', !!(root && !root.querySelector('.source')), true);
@@ -261,7 +261,8 @@ function loadApi(html) {
   check('P1 yesterday unmatched is that day only', !!(p1Yest && p1Yest.textContent.indexOf('MR BRAIN') !== -1 && p1Yest.textContent.indexOf('CT HEAD') === -1), true);
   check('P1 today matched uses template arrow short series', mLines, ['Head and Neck ← CT NECK']);
   const todayTime = p1Today ? p1Today.querySelector('td.time').textContent.replace(/\s+/g, ' ').trim() : '';
-  check('P1 last submitted has Today badge and time', todayTime.indexOf('Today') !== -1 && todayTime.indexOf('13:51:51') !== -1, true);
+  check('P1 last submitted shows only the time', todayTime, '13:51:51');
+  check('last submitted has no day badge', !p1Today.querySelector('.badge') && todayTime.indexOf('Today') === -1 && todayTime.indexOf('Yest.') === -1, true);
   check('today rows are not unmatched-only', !!(p1Today && p2Today && !p1Today.classList.contains('alert') && !p2Today.classList.contains('alert')), true);
   check('yesterday unmatched-only rows use alert marker', !!(p1Yest && p1Yest.classList.contains('alert') && p1Yest.querySelector('.alert-mark')), true);
   const panelCss = (root.querySelector('style') || {}).textContent || '';

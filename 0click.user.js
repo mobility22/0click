@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         0click
 // @namespace    https://github.com/mobility22/0click
-// @version      1.5
+// @version      1.6
 // @description  Read-only AutoContour Zero-Click Jobs History summary
 // @match        http://10.240.61.81:18001/*
 // @updateURL    https://raw.githubusercontent.com/mobility22/0click/refs/heads/main/0click.user.js
@@ -12,13 +12,13 @@
 // @inject-into  page
 // ==/UserScript==
 
-// 0click 1.5 — AutoContour Zero-Click Jobs History summary (read-only)
+// 0click 1.6 — AutoContour Zero-Click Jobs History summary (read-only)
 
 (function () {
   'use strict';
   const TAG = '[0click]';
-  const SCRIPT_VERSION = '1.5';
-  const PANEL_TITLE = '0click 1.5';
+  const SCRIPT_VERSION = '1.6';
+  const PANEL_TITLE = '0click 1.6';
   const PANEL_ID = 'zclick-panel';
   const DEBOUNCE_MS = 250;
   const PAGE_SIZE = 500;
@@ -1208,10 +1208,8 @@
       const latest = latestSubmittedText(all);
       const ttd = el('td', 'time');
       if (latest) {
-        const badge = el('span', 'badge ' + (day === 'today' ? 'today' : 'yest'), day === 'today' ? 'Today' : 'Yest.');
-        ttd.appendChild(badge);
         const dt = parseSubmittedDateTime(latest);
-        ttd.appendChild(document.createTextNode(' ' + (dt ? formatClock(dt) : formatLastSubmitted(latest))));
+        ttd.textContent = dt ? formatClock(dt) : formatLastSubmitted(latest);
         ttd.title = String(latest);
       } else {
         ttd.appendChild(el('span', 'none', '—'));
@@ -1355,9 +1353,6 @@
       'td.patient-cell { font-weight: 600; white-space: nowrap; }' +
       'button.patient-link { background: none; border: 0; padding: 0; font: inherit; font-weight: 600; color: #0d47a1; text-decoration: underline; cursor: pointer; }' +
       'td.time { white-space: nowrap; color: #333; }' +
-      '.badge { display: inline-block; font-size: 10px; font-weight: 800; padding: 1px 5px; border-radius: 3px; margin-right: 2px; letter-spacing: .03em; vertical-align: middle; }' +
-      '.badge.today { background: #1976d2; color: #fff; }' +
-      '.badge.yest { background: #78909c; color: #fff; }' +
       '.alert-mark { display: inline-block; margin-right: 4px; background: #ef6c00; color: #fff; font-weight: 800; font-size: 10px; line-height: 1.4; padding: 0 5px; border-radius: 3px; vertical-align: middle; }' +
       '.locate-note { display: none; padding: 4px 10px; font-size: 11px; color: #b71c1c; flex: 0 0 auto; }' +
       '.locate-note.ok { color: #1565c0; }' +
