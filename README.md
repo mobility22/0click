@@ -1,6 +1,6 @@
 # 0click
 
-Tampermonkey userscript **0click** v1.1 for the AutoContour Zero-Click Jobs History page.
+Tampermonkey userscript **0click** v1.2 for the AutoContour Zero-Click Jobs History page.
 
 The script runs on `http://10.240.61.81:18001/*` (for example `/jobs/history`). It is read-only: it never clicks anything on the page, never changes the page's filters, and never sends POST, PUT, or DELETE requests.
 
@@ -8,19 +8,23 @@ The script runs on `http://10.240.61.81:18001/*` (for example `/jobs/history`). 
 
 https://raw.githubusercontent.com/mobility22/0click/refs/heads/main/0click.user.js
 
-In Tampermonkey, choose Install from URL and paste that link, or open it after Tampermonkey is installed. Auto-update uses the same raw URL on `main`. After a first install, use Tampermonkey's Check for updates (or reinstall from that URL) to get v1.1.
+In Tampermonkey, choose Install from URL and paste that link, or open it after Tampermonkey is installed. Auto-update uses the same raw URL on `main`. After a first install, use Tampermonkey's Check for updates (or reinstall from that URL) to get v1.2.
 
 ## What it does
 
-A floating **0click 1.1** panel summarizes ROS jobs from **today and yesterday** (the browser's local date). The date range is shown in the panel header.
+A floating **0click 1.2** panel summarizes jobs from **today and yesterday** (the browser's local date). The date range is shown in the panel header.
 
 - Only rows whose Workflow contains `ROS` (for example `KP_ROS`) are included.
 - Only rows whose Date Submitted falls on today or yesterday are included. Date Submitted is parsed as `YYYY-MM-DD HH:MM:SS` (other similar date forms are also accepted).
-- Rows are grouped by the Patient cell / field.
-- For each patient, series are listed in two groups:
-  - **Transferred, no matching template**: Template is `-` or empty. Each item shows Series Description, Status, and Date Submitted.
-  - **Matched**: Template is not `-` or empty. Each item also shows the template name.
-- Counts are shown per patient and as overall totals.
+- The panel is a compact table with **one row per patient** and these columns:
+  - **Patient**
+  - **Unmatched (N)**: every no-template series for that patient in one cell. Each series is shortened to about the first 3 words or ~20 characters (with … if trimmed). Repeated short labels are shown once with a ×count. The full description is on a tooltip (`title`).
+  - **Matched**: the template name plus a short series label, for example `ROS_Thorax ← Ave-IP(10)…`.
+  - **Last submitted**: the most recent Date Submitted time for that patient.
+- Rows that have unmatched series and no matched series are highlighted. A totals row sits at the bottom of the table.
+- Click a patient name to scroll the page's Jobs History table to that patient's first matching row and briefly highlight it. The script only scrolls and highlights; it never clicks page controls or changes filters. If that row is not in the current page (for example the data came from the API but the row is not rendered), the panel shows a small "not on this page" note.
+
+The table has a sticky header, zebra rows, a compact 12px font, cell borders, and a scroll area. The panel starts about 700px wide and can be resized.
 
 ## How it gets data
 
@@ -41,4 +45,4 @@ The panel lives in a closed shadow root so a Ctrl+F search does not hit the summ
 
 ## Tests
 
-`node --check 0click.user.js`, and `node test/0click.test.js` for ROS filtering, the last-two-days window, grouping, the matched / no-template split, JSON payload mapping, same-origin GET expansion and pagination, the DOM fallback, and the panel being hidden from find-in-page (uses `jsdom` when installed).
+`node --check 0click.user.js`, and `node test/0click.test.js` for workflow filtering, the last-two-days window, grouping, the matched / no-template split, short series labels and unmatched consolidation, JSON payload mapping, same-origin GET expansion and pagination, the DOM fallback, and the one-row-per-patient table, click-to-locate without page clicks, and the panel being hidden from find-in-page (uses `jsdom` when installed).

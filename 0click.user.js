@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         0click
 // @namespace    https://github.com/mobility22/0click
-// @version      1.1
-// @description  Read-only ROS Jobs History summary for AutoContour Zero-Click
+// @version      1.2
+// @description  Read-only AutoContour Zero-Click Jobs History summary
 // @match        http://10.240.61.81:18001/*
 // @updateURL    https://raw.githubusercontent.com/mobility22/0click/refs/heads/main/0click.user.js
 // @downloadURL  https://raw.githubusercontent.com/mobility22/0click/refs/heads/main/0click.user.js
@@ -10,13 +10,13 @@
 // @grant        unsafeWindow
 // ==/UserScript==
 
-// 0click 1.1 — AutoContour Zero-Click Jobs History ROS summary (read-only)
+// 0click 1.2 — AutoContour Zero-Click Jobs History summary (read-only)
 
 (function () {
   'use strict';
   const TAG = '[0click]';
-  const SCRIPT_VERSION = '1.1';
-  const PANEL_TITLE = '0click 1.1';
+  const SCRIPT_VERSION = '1.2';
+  const PANEL_TITLE = '0click 1.2';
   const PANEL_ID = 'zclick-panel';
   const DEBOUNCE_MS = 250;
   const PAGE_SIZE = 500;
@@ -55,6 +55,112 @@
     m = /^(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})(?:[ T](\d{1,2}):(\d{2})(?::(\d{2}))?)?/.exec(t);
     if (m) return localYmd(Number(m[3]), Number(m[1]), Number(m[2]));
     return null;
+  }
+  function applyTime(d, hour, minute, second) {
+    if (!d) return null;
+    const out = new Date(d.getTime());
+    out.setHours(Number(hour || 0), Number(minute || 0), Number(second || 0), 0);
+    return out;
+  }
+  function parseSubmittedDateTime(text) {
+    const t = norm(text);
+    if (!t) return null;
+    let m = /^(\d{4})-(\d{1,2})-(\d{1,2})(?:[ T](\d{1,2}):(\d{2})(?::(\d{2}))?)?/.exec(t);
+    if (m) return applyTime(localYmd(Number(m[1]), Number(m[2]), Number(m[3])), m[4], m[5], m[6]);
+    m = /^(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})(?:[ T](\d{1,2}):(\d{2})(?::(\d{2}))?)?/.exec(t);
+    if (m) return applyTime(localYmd(Number(m[3]), Number(m[1]), Number(m[2])), m[4], m[5], m[6]);
+    return null;
+  }
+  function formatClock(d) {
+    const pad = n => String(n).padStart(2, '0');
+    return pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds());
+  }
+  function formatLastSubmitted(text, now) {
+    const d = parseSubmittedDateTime(text);
+    if (!d) return norm(text);
+    const today = startOfLocalDay(now || nowFn());
+    const day = startOfLocalDay(d);
+    if (day.getTime() === today.getTime()) return formatClock(d);
+    const pad = n => String(n).padStart(2, '0');
+    return pad(d.getMonth() + 1) + '-' + pad(d.getDate()) + ' ' + formatClock(d);
+  }
+  function latestSubmittedText(rows) {
+    let best = null, bestText = '';
+    for (const r of rows || []) {
+      const d = parseSubmittedDateTime(r && r.submitted);
+      if (!d) continue;
+      if (!best || d.getTime() > best.getTime()) {
+        best = d;
+        bestText = r.submitted;
+      }
+    }
+    return bestText;
+  }
+  const SHORT_WORDS = 3;
+  const SHORT_MAX = 20;
+  function shortSeriesLabel(text) {
+    const full = norm(text);
+    if (!full) return '';
+    const words = full.split(' ');
+    let short = words.slice(0, SHORT_WORDS).join(' ');
+    if (short.length > SHORT_MAX) {
+      let cut = short.slice(0, SHORT_MAX);
+      if (cut.lastIndexOf(' ') > 8) cut = cut.slice(0, cut.lastIndexOf(' '));
+      short = cut;
+    }
+    short = short.replace(/[.,;:\s]+$/, '');
+    if (short.length < full.length) short += '…';
+    return short;
+  }
+  function consolidateUnmatched(items) {
+    const order = [];
+    const map = new Map();
+    for (const item of items || []) {
+      const full = norm(item && item.series) || '(no series description)';
+      const short = shortSeriesLabel(item && item.series) || full;
+      if (!map.has(short)) {
+        map.set(short, { short: short, count: 0, fulls: [] });
+        order.push(short);
+      }
+      const g = map.get(short);
+      g.count++;
+      if (full && g.fulls.indexOf(full) === -1) g.fulls.push(full);
+    }
+    return order.map(k => {
+      const g = map.get(k);
+      return {
+        short: g.short,
+        count: g.count,
+        label: g.count > 1 ? g.short + ' ×' + g.count : g.short,
+        title: g.fulls.join('\n')
+      };
+    });
+  }
+  function formatMatchedItems(items) {
+    const order = [];
+    const map = new Map();
+    for (const item of items || []) {
+      const tmpl = norm(item && item.template);
+      const full = norm(item && item.series) || '(no series description)';
+      const short = shortSeriesLabel(item && item.series) || full;
+      const display = tmpl ? (tmpl + ' ← ' + short) : short;
+      if (!map.has(display)) {
+        map.set(display, { display: display, count: 0, fulls: [] });
+        order.push(display);
+      }
+      const g = map.get(display);
+      g.count++;
+      const tip = tmpl ? (tmpl + ' ← ' + full) : full;
+      if (g.fulls.indexOf(tip) === -1) g.fulls.push(tip);
+    }
+    return order.map(k => {
+      const g = map.get(k);
+      return {
+        label: g.count > 1 ? g.display + ' ×' + g.count : g.display,
+        title: g.fulls.join('\n'),
+        count: g.count
+      };
+    });
   }
   function lastTwoDayRange(now) {
     const today = startOfLocalDay(now || nowFn());
@@ -632,7 +738,7 @@
       submitted: get('submitted')
     };
   }
-  function rowsFromContainer(root) {
+  function rowsFromContainer(root, withEl) {
     if (!root || ourUi(root)) return [];
     let rowEls = [];
     if (root.rows && root.rows.length) rowEls = [...root.rows];
@@ -657,7 +763,7 @@
       if (isFilterRow(row)) continue;
       const rec = rowFromCells(cells, map);
       if (!rec.patient && !rec.workflow && !rec.series) continue;
-      out.push(rec);
+      out.push(withEl ? { rec: rec, el: row } : rec);
     }
     return out;
   }
@@ -676,6 +782,89 @@
       rows.push.apply(rows, rowsFromContainer(root));
     }
     return rows;
+  }
+  function collectDomJobRows() {
+    const out = [];
+    for (const root of findJobContainers()) {
+      out.push.apply(out, rowsFromContainer(root, true));
+    }
+    return out;
+  }
+  function findPatientDomRow(group) {
+    const name = norm(group && group.patient);
+    if (!name) return null;
+    const items = ((group && group.matched) || []).concat((group && group.unmatched) || []);
+    const seriesSet = new Set(items.map(r => norm(r.series)).filter(Boolean));
+    const dateSet = new Set(items.map(r => norm(r.submitted)).filter(Boolean));
+    let fallback = null;
+    for (const item of collectDomJobRows()) {
+      const rec = item && item.rec, el = item && item.el;
+      if (!rec || !el || norm(rec.patient) !== name) continue;
+      if (!fallback) fallback = el;
+      if ((rec.series && seriesSet.has(norm(rec.series))) || (rec.submitted && dateSet.has(norm(rec.submitted)))) {
+        return el;
+      }
+    }
+    return fallback;
+  }
+  const FLASH_MS = 2000;
+  let flashTimer = null, flashEl = null, flashPrev = null;
+  function clearFlash() {
+    if (flashTimer) { clearTimeout(flashTimer); flashTimer = null; }
+    if (flashEl && flashPrev) {
+      try {
+        flashEl.style.outline = flashPrev.outline;
+        flashEl.style.outlineOffset = flashPrev.outlineOffset;
+        flashEl.style.backgroundColor = flashPrev.backgroundColor;
+        flashEl.style.transition = flashPrev.transition;
+        flashEl.style.boxShadow = flashPrev.boxShadow;
+      } catch (e) { /* ignore */ }
+    }
+    flashEl = null;
+    flashPrev = null;
+  }
+  function highlightDomRow(rowEl) {
+    if (!rowEl) return false;
+    clearFlash();
+    flashEl = rowEl;
+    flashPrev = {
+      outline: rowEl.style.outline,
+      outlineOffset: rowEl.style.outlineOffset,
+      backgroundColor: rowEl.style.backgroundColor,
+      transition: rowEl.style.transition,
+      boxShadow: rowEl.style.boxShadow
+    };
+    rowEl.style.transition = 'background-color 0.2s, box-shadow 0.2s';
+    rowEl.style.outline = '3px solid #1565c0';
+    rowEl.style.outlineOffset = '-2px';
+    rowEl.style.backgroundColor = '#fff59d';
+    rowEl.style.boxShadow = '0 0 0 3px rgba(21,101,192,.35)';
+    try { rowEl.scrollIntoView({ block: 'center', behavior: 'smooth' }); }
+    catch (e) {
+      try { rowEl.scrollIntoView(true); } catch (e2) { /* ignore */ }
+    }
+    flashTimer = setTimeout(clearFlash, FLASH_MS);
+    return true;
+  }
+  function setLocateNote(text) {
+    const root = panelShadow;
+    const note = root && root.querySelector('.locate-note');
+    if (!note) return;
+    const msg = text ? String(text) : '';
+    note.textContent = msg;
+    note.style.display = msg ? 'block' : 'none';
+  }
+  function locatePatient(group) {
+    const row = findPatientDomRow(group);
+    if (row) {
+      setLocateNote('');
+      highlightDomRow(row);
+      debug('locate', 'ok');
+      return true;
+    }
+    setLocateNote('not on this page');
+    debug('locate', 'not-on-page');
+    return false;
   }
   function getRowsAndSource() {
     if (apiRows) return { rows: apiRows, source: 'api', path: apiPath, state: apiState };
@@ -740,35 +929,70 @@
     if (text != null && text !== '') node.textContent = text;
     return node;
   }
-  function addSeriesList(parent, title, items, showTemplate) {
-    const wrap = el('div', 'group');
-    wrap.appendChild(el('div', 'group-title', title + ' (' + items.length + ')'));
+  function addChips(td, items, kind) {
     if (!items.length) {
-      wrap.appendChild(el('div', 'empty', 'None'));
-      parent.appendChild(wrap);
+      td.appendChild(el('span', 'none', '—'));
       return;
     }
-    const ul = el('ul', 'series');
+    const wrap = el('div', 'chips');
     for (const item of items) {
-      const li = el('li');
-      const line = el('div', 'series-name', item.series || '(no series description)');
-      li.appendChild(line);
-      const meta = el('div', 'series-meta');
-      const bits = [];
-      if (item.status) bits.push(item.status);
-      if (item.submitted) bits.push(item.submitted);
-      if (showTemplate && item.template) bits.push(item.template);
-      meta.textContent = bits.join(' \u00b7 ');
-      li.appendChild(meta);
-      ul.appendChild(li);
+      const chip = el('span', 'chip ' + kind, item.label);
+      if (item.title) chip.title = item.title;
+      wrap.appendChild(chip);
     }
-    wrap.appendChild(ul);
-    parent.appendChild(wrap);
+    td.appendChild(wrap);
   }
   function sourceLabel(info) {
-    if (info.state === 'loading' && !apiRows) return 'Source: loading jobs API\u2026';
+    if (info.state === 'loading' && !apiRows) return 'Source: loading jobs API…';
     if (info.source === 'api') return 'Source: GET ' + (info.path || '/');
     return 'Source: visible table (API not detected; may be limited by page filters or pagination)';
+  }
+  function renderSummaryTable(body, summary) {
+    const table = el('table', 'grid');
+    const thead = el('thead');
+    const hr = el('tr');
+    hr.appendChild(el('th', '', 'Patient'));
+    hr.appendChild(el('th', '', 'Unmatched (' + summary.unmatchedCount + ')'));
+    hr.appendChild(el('th', '', 'Matched'));
+    hr.appendChild(el('th', '', 'Last submitted'));
+    thead.appendChild(hr);
+    table.appendChild(thead);
+    const tbody = el('tbody');
+    for (const g of summary.groups) {
+      const tr = el('tr', (g.unmatchedCount > 0 && g.matchedCount === 0) ? 'alert' : '');
+      const ptd = el('td', 'patient-cell');
+      const btn = el('button', 'patient-link', g.patient);
+      btn.type = 'button';
+      btn.addEventListener('click', ev => {
+        ev.preventDefault();
+        ev.stopPropagation();
+        locatePatient(g);
+      });
+      ptd.appendChild(btn);
+      tr.appendChild(ptd);
+      const utd = el('td', 'unmatched-cell');
+      addChips(utd, consolidateUnmatched(g.unmatched), 'unmatched');
+      tr.appendChild(utd);
+      const mtd = el('td', 'matched-cell');
+      addChips(mtd, formatMatchedItems(g.matched), 'matched');
+      tr.appendChild(mtd);
+      const all = (g.matched || []).concat(g.unmatched || []);
+      const latest = latestSubmittedText(all);
+      const ttd = el('td', 'time', latest ? formatLastSubmitted(latest) : '—');
+      if (latest) ttd.title = String(latest);
+      tr.appendChild(ttd);
+      tbody.appendChild(tr);
+    }
+    table.appendChild(tbody);
+    const tfoot = el('tfoot');
+    const fr = el('tr');
+    fr.appendChild(el('td', '', summary.patientCount + ' patient' + (summary.patientCount === 1 ? '' : 's')));
+    fr.appendChild(el('td', '', summary.unmatchedCount + ' unmatched'));
+    fr.appendChild(el('td', '', summary.matchedCount + ' matched'));
+    fr.appendChild(el('td', '', ''));
+    tfoot.appendChild(fr);
+    table.appendChild(tfoot);
+    body.appendChild(table);
   }
   function renderBody() {
     const root = panelShadow;
@@ -785,28 +1009,18 @@
     if (rangeEl) rangeEl.textContent = summary.rangeLabel;
     if (sourceEl) sourceEl.textContent = sourceLabel(info);
     totalsEl.textContent =
-      summary.patientCount + ' ROS patient' + (summary.patientCount === 1 ? '' : 's') +
-      ' \u00b7 ' + summary.seriesCount + ' series \u00b7 ' +
-      summary.matchedCount + ' matched \u00b7 ' +
-      summary.unmatchedCount + ' no matching template';
+      summary.patientCount + ' patient' + (summary.patientCount === 1 ? '' : 's') +
+      ' · ' + summary.seriesCount + ' series · ' +
+      summary.matchedCount + ' matched · ' +
+      summary.unmatchedCount + ' unmatched';
     if (info.state === 'loading' && info.source !== 'api') {
-      body.appendChild(el('div', 'empty', 'Loading the last two days from the jobs API\u2026'));
+      body.appendChild(el('div', 'empty', 'Loading the last two days from the jobs API…'));
     } else if (info.source !== 'api' && !summary.tableCount) {
       body.appendChild(el('div', 'empty', 'No jobs table found on this page.'));
     } else if (!summary.seriesCount) {
-      body.appendChild(el('div', 'empty', 'No ROS workflow jobs in the last two days.'));
-    }
-    for (const g of summary.groups) {
-      const card = el('section', 'patient');
-      card.appendChild(el('h2', 'patient-name', g.patient));
-      card.appendChild(el(
-        'div',
-        'patient-counts',
-        g.total + ' series \u00b7 ' + g.matchedCount + ' matched \u00b7 ' + g.unmatchedCount + ' no matching template'
-      ));
-      addSeriesList(card, 'Transferred, no matching template', g.unmatched, false);
-      addSeriesList(card, 'Matched', g.matched, true);
-      body.appendChild(card);
+      body.appendChild(el('div', 'empty', 'No matching workflow jobs in the last two days.'));
+    } else {
+      renderSummaryTable(body, summary);
     }
     log(
       'summary',
@@ -827,6 +1041,17 @@
     if (wrap) wrap.classList.toggle('collapsed', collapsed);
     if (toggle) toggle.textContent = collapsed ? 'Show' : 'Hide';
     setHostHidden(collapsed);
+    const host = document.getElementById(PANEL_ID);
+    if (host) {
+      if (collapsed) {
+        if (!host.dataset.openHeight) host.dataset.openHeight = host.style.height || '520px';
+        host.style.height = 'auto';
+        host.style.resize = 'none';
+      } else {
+        host.style.height = host.dataset.openHeight || '520px';
+        host.style.resize = 'both';
+      }
+    }
   }
   function onRefresh(ev) {
     ev.preventDefault();
@@ -838,35 +1063,42 @@
     if (document.getElementById(PANEL_ID)) return;
     const panel = document.createElement('div');
     panel.id = PANEL_ID;
-    panel.style.cssText = 'position:fixed;top:12px;right:12px;z-index:99999;width:360px;background:transparent;';
+    panel.style.cssText = 'position:fixed;top:12px;right:12px;z-index:99999;width:700px;max-width:calc(100vw - 24px);min-width:520px;min-height:180px;height:520px;max-height:calc(100vh - 24px);resize:both;overflow:hidden;background:transparent;';
     // Closed shadow root so Ctrl+F does not match panel text (including patient names).
     panelShadow = panel.attachShadow({ mode: 'closed' });
     panelShadow.innerHTML =
       '<style>' +
-      ':host, .wrap { font: 13px/1.4 sans-serif; color: #111; }' +
-      '.wrap { width: 360px; max-height: calc(100vh - 24px); background: #fff; border: 2px solid #1565c0; border-radius: 8px; box-shadow: 0 3px 10px rgba(0,0,0,.35); box-sizing: border-box; display: flex; flex-direction: column; overflow: hidden; }' +
-      '.bar { display: flex; align-items: center; gap: 6px; padding: 8px 10px; background: #1565c0; color: #fff; }' +
+      ':host, .wrap { font: 12px/1.35 sans-serif; color: #111; }' +
+      '.wrap { width: 100%; height: 100%; background: #fff; border: 2px solid #1565c0; border-radius: 8px; box-shadow: 0 3px 10px rgba(0,0,0,.35); box-sizing: border-box; display: flex; flex-direction: column; overflow: hidden; }' +
+      '.bar { display: flex; align-items: center; gap: 6px; padding: 8px 10px; background: #1565c0; color: #fff; flex: 0 0 auto; }' +
       '.head { flex: 1; min-width: 0; }' +
       '.title { font-weight: bold; font-size: 15px; }' +
       '.range { font-size: 11px; opacity: .95; margin-top: 1px; }' +
       '.bar button { font-size: 12px; padding: 3px 8px; border: 0; border-radius: 4px; background: #fff; color: #1565c0; font-weight: bold; cursor: pointer; }' +
-      '.totals { padding: 8px 10px 2px; font-size: 12px; color: #333; }' +
-      '.source { padding: 0 10px 4px; font-size: 11px; color: #444; border-bottom: 1px solid #e0e0e0; }' +
-      '.note { padding: 4px 10px 8px; font-size: 11px; color: #555; }' +
-      '.body { padding: 8px 10px 12px; overflow: auto; }' +
-      '.wrap.collapsed .totals, .wrap.collapsed .source, .wrap.collapsed .note, .wrap.collapsed .body { display: none; }' +
-      '.wrap.collapsed { width: auto; }' +
-      '.empty { color: #555; font-style: italic; margin: 6px 0; }' +
-      '.patient { margin: 0 0 12px; padding: 0 0 10px; border-bottom: 1px solid #eee; }' +
-      '.patient:last-child { border-bottom: 0; margin-bottom: 0; }' +
-      'h2.patient-name { margin: 0 0 2px; font-size: 14px; }' +
-      '.patient-counts { font-size: 11px; color: #444; margin-bottom: 6px; }' +
-      '.group { margin: 6px 0 0; }' +
-      '.group-title { font-weight: bold; font-size: 12px; color: #1565c0; }' +
-      'ul.series { margin: 4px 0 0; padding: 0 0 0 16px; }' +
-      'ul.series li { margin: 0 0 6px; }' +
-      '.series-name { font-weight: 600; }' +
-      '.series-meta { font-size: 11px; color: #444; }' +
+      '.totals { padding: 6px 10px 2px; font-size: 12px; color: #333; flex: 0 0 auto; }' +
+      '.source { padding: 0 10px 4px; font-size: 11px; color: #444; flex: 0 0 auto; }' +
+      '.note { padding: 0 10px 6px; font-size: 11px; color: #555; flex: 0 0 auto; }' +
+      '.body { padding: 0 0 0; overflow: auto; flex: 1 1 auto; min-height: 0; border-top: 1px solid #e0e0e0; }' +
+      '.wrap.collapsed .totals, .wrap.collapsed .source, .wrap.collapsed .note, .wrap.collapsed .locate-note, .wrap.collapsed .body { display: none; }' +
+      '.wrap.collapsed { height: auto; }' +
+      '.empty { color: #555; font-style: italic; margin: 8px 10px; }' +
+      'table.grid { width: 100%; border-collapse: collapse; table-layout: auto; }' +
+      'table.grid th, table.grid td { border: 1px solid #c5d4e8; padding: 5px 7px; vertical-align: top; text-align: left; }' +
+      'table.grid thead th { position: sticky; top: 0; background: #1565c0; color: #fff; z-index: 1; font-weight: 700; box-shadow: 0 1px 0 #0d47a1; }' +
+      'table.grid tbody tr:nth-child(odd) { background: #fff; }' +
+      'table.grid tbody tr:nth-child(even) { background: #f4f8fc; }' +
+      'table.grid tbody tr.alert { background: #fff3e0; }' +
+      'table.grid tbody tr.alert:nth-child(even) { background: #ffe8cc; }' +
+      'table.grid tfoot td { position: sticky; bottom: 0; background: #eceff1; font-weight: 700; box-shadow: 0 -1px 0 #cfd8dc; }' +
+      'td.patient-cell { font-weight: 600; white-space: nowrap; }' +
+      'button.patient-link { background: none; border: 0; padding: 0; font: inherit; font-weight: 600; color: #0d47a1; text-decoration: underline; cursor: pointer; }' +
+      'td.time { white-space: nowrap; color: #333; }' +
+      '.locate-note { display: none; padding: 4px 10px; font-size: 11px; color: #b71c1c; flex: 0 0 auto; }' +
+      '.chips { display: flex; flex-wrap: wrap; gap: 4px; }' +
+      '.chip { display: inline-block; border-radius: 10px; padding: 1px 7px; font-size: 11px; line-height: 1.4; max-width: 100%; }' +
+      '.chip.unmatched { background: #fff8e1; border: 1px solid #ffcc80; }' +
+      '.chip.matched { background: #e8f5e9; border: 1px solid #a5d6a7; }' +
+      '.none { color: #888; }' +
       '</style>' +
       '<div class="wrap">' +
       '<div class="bar">' +
@@ -876,7 +1108,8 @@
       '</div>' +
       '<div class="totals"></div>' +
       '<div class="source"></div>' +
-      '<div class="note">Read-only. Prefers the same-origin jobs API (GET only) so the summary is not limited by the page column filters. Falls back to the visible table if the API is not detected. Includes today and yesterday (local date). Never changes page filters or clicks pagination.</div>' +
+      '<div class="note">Read-only. Prefers the same-origin jobs API (GET only) so the summary is not limited by the page column filters. Falls back to the visible table if the API is not detected. Includes today and yesterday (local date). Never changes page filters or clicks pagination. Click a patient name to scroll to that row in the page table (highlight only; no page clicks).</div>' +
+      '<div class="locate-note"></div>' +
       '<div class="body"></div>' +
       '</div>';
     panelShadow.querySelector('.title').textContent = PANEL_TITLE;
@@ -927,10 +1160,12 @@
       SCRIPT_VERSION, PANEL_TITLE, PANEL_ID, PAGE_SIZE, DEBUG,
       isRosWorkflow, isMatchedTemplate, headerKey, extractRows, rowsFromContainer,
       groupByPatient, addPanel, renderBody, panelRoot: () => panelShadow,
-      parseSubmittedDate, isWithinLastTwoLocalDays, lastTwoDayRange, setNow, formatLocalDate,
+      parseSubmittedDate, parseSubmittedDateTime, isWithinLastTwoLocalDays, lastTwoDayRange, setNow, formatLocalDate,
       inferDateFormat, formatDateWith, mapJobObject, rowsFromPayload, pickCollection,
       isAllowedGet, buildExpandedUrls, nextPageUrl, fetchExpanded, considerResponse,
       hookNetwork, getRowsAndSource, resetApiState, sourceLabel, safePath, debugEnabled,
+      shortSeriesLabel, consolidateUnmatched, formatMatchedItems, formatLastSubmitted, latestSubmittedText,
+      collectDomJobRows, findPatientDomRow, locatePatient, highlightDomRow, setLocateNote, FLASH_MS,
       setApiRowsForTest: (rows, path) => { apiRows = rows; apiPath = path || '/api/jobs'; apiState = rows ? 'api' : 'idle'; lastJobsUrl = path || lastJobsUrl; },
       norm
     };

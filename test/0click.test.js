@@ -11,10 +11,10 @@ function check(name, got, expected) {
   console.log((ok ? 'PASS' : 'FAIL') + ' ' + name + ' got ' + JSON.stringify(got) + ' expected ' + JSON.stringify(expected));
 }
 
-check('script @version 1.1', /@version\s+1\.1\b/.test(src), true);
-check('script SCRIPT_VERSION', /const SCRIPT_VERSION = '1\.1'/.test(src), true);
-check('script header comment 0click 1.1', /\/\/ 0click 1\.1\b/.test(src), true);
-check('script PANEL_TITLE', /const PANEL_TITLE = '0click 1\.1'/.test(src), true);
+check('script @version 1.2', /@version\s+1\.2\b/.test(src), true);
+check('script SCRIPT_VERSION', /const SCRIPT_VERSION = '1\.2'/.test(src), true);
+check('script header comment 0click 1.2', /\/\/ 0click 1\.2\b/.test(src), true);
+check('script PANEL_TITLE', /const PANEL_TITLE = '0click 1\.2'/.test(src), true);
 check('script @run-at document-start', /@run-at\s+document-start/.test(src), true);
 check('script closed shadow', src.includes("attachShadow({ mode: 'closed' })"), true);
 check('script @downloadURL raw main', src.includes('https://raw.githubusercontent.com/mobility22/0click/refs/heads/main/0click.user.js'), true);
@@ -24,6 +24,10 @@ check('no GM_setValue', !src.includes('GM_setValue') && !src.includes('GM_getVal
 check('no localStorage of row data', !/localStorage\.(setItem|getItem)/.test(src), true);
 check('debug flag off by default', /const DEBUG = false/.test(src), true);
 check('GET only: no POST/PUT/DELETE issued', !/method:\s*['"]POST['"]/.test(src) && !/method:\s*['"]PUT['"]/.test(src) && !/method:\s*['"]DELETE['"]/.test(src), true);
+
+const userscriptHeader = src.split('(function ()')[0];
+check('userscript header/metadata has no ROS', /ROS/.test(userscriptHeader), false);
+check('ROS workflow filter logic kept', /function isRosWorkflow/.test(src) && /\/ROS\/i/.test(src), true);
 
 function loadJsdom() {
   const tries = ['jsdom', '/tmp/jsdom-root/node_modules/jsdom', path.join(__dirname, '../node_modules/jsdom')];
@@ -81,6 +85,12 @@ function loadApi(html) {
     runScripts: 'dangerously',
     beforeParse(window) {
       window.ZEROCLICK_TEST = true;
+      window.__zclickScrolls = [];
+      window.__zclickPageClicks = [];
+      const proto = window.HTMLElement.prototype;
+      proto.scrollIntoView = function (opts) {
+        window.__zclickScrolls.push({ id: this.id || '', opts: opts || null });
+      };
     }
   });
   const script = dom.window.document.createElement('script');
@@ -138,19 +148,92 @@ function loadApi(html) {
   check('panel host light DOM has no patient text', light.indexOf(P1) === -1 && light.indexOf(P2) === -1, true);
   const root = api.panelRoot();
   check('panel uses closed shadow root', !!(root && root.mode === 'closed'), true);
-  check('panel title is 0click 1.1', !!(root && root.querySelector('.title') && root.querySelector('.title').textContent === '0click 1.1'), true);
+  check('panel title is 0click 1.2', !!(root && root.querySelector('.title') && root.querySelector('.title').textContent === '0click 1.2'), true);
   check('panel has refresh button', !!(root && root.querySelector('.refresh')), true);
   check('panel header shows date range', !!(root && root.querySelector('.range') && root.querySelector('.range').textContent === '2026-11-11 \u2013 2026-11-12'), true);
   const bodyText = root && root.querySelector('.body') ? root.querySelector('.body').textContent : '';
   check('panel lists first patient in shadow only', bodyText.indexOf(P1) !== -1, true);
-  check('panel lists unmatched heading', bodyText.indexOf('Transferred, no matching template') !== -1, true);
-  check('panel lists matched heading', /Matched \(/.test(bodyText), true);
+  const grid = root && root.querySelector('table.grid');
+  check('panel uses a summary table', !!grid, true);
+  const heads = grid ? [...grid.querySelectorAll('thead th')].map(th => th.textContent) : [];
+  check('table column Patient', heads[0], 'Patient');
+  check('table column Unmatched (N)', /^Unmatched \(\d+\)$/.test(heads[1] || ''), true);
+  check('table column Matched', heads[2], 'Matched');
+  check('table column Last submitted', heads[3], 'Last submitted');
+  check('one table row per patient', grid ? grid.querySelectorAll('tbody tr').length : 0, 2);
+  check('panel lists unmatched heading', /Unmatched \(/.test(bodyText), true);
+  check('panel lists matched heading', heads[2] === 'Matched', true);
   check('panel does not list excluded non-ROS series', bodyText.indexOf('CT CHEST') === -1, true);
   check('panel does not list old-date series', bodyText.indexOf('CT OLD') === -1, true);
   const logBlob = logs.join('\n');
   check('console logs do not contain patient names', logBlob.indexOf(P1) === -1 && logBlob.indexOf(P2) === -1, true);
   check('debug disabled by default', api.debugEnabled(), false);
+
+  check('short label keeps short text', api.shortSeriesLabel('CT HEAD'), 'CT HEAD');
+  check('short label first 3 words or ~20 chars', api.shortSeriesLabel('Ave-IP(10) Axial 2.0 mm FREE BREATHING'), 'Ave-IP(10) Axial 2.0…');
+  const longTok = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+  check('short label trims a long token', api.shortSeriesLabel(longTok), 'ABCDEFGHIJKLMNOPQRST…');
+  const cons = api.consolidateUnmatched([
+    { series: 'Ave-IP(10) Axial 2.0 mm A' },
+    { series: 'Ave-IP(10) Axial 2.0 mm B' },
+    { series: 'CT HEAD' }
+  ]);
+  check('consolidate repeats into one chip with count', cons.map(c => c.label), ['Ave-IP(10) Axial 2.0… ×2', 'CT HEAD']);
+  check('consolidate tooltip has full descriptions', cons[0].title.indexOf('Ave-IP(10) Axial 2.0 mm A') !== -1 && cons[0].title.indexOf('Ave-IP(10) Axial 2.0 mm B') !== -1, true);
+  const matched = api.formatMatchedItems([{ template: 'ROS_Thorax', series: 'Ave-IP(10) Axial 2.0 mm FREE BREATHING' }]);
+  check('matched label is template plus short series', matched[0].label, 'ROS_Thorax ← Ave-IP(10) Axial 2.0…');
+
+  const p1Row = grid && grid.querySelectorAll('tbody tr')[0];
+  const p2Row = grid && grid.querySelectorAll('tbody tr')[1];
+  const uChips = p1Row ? [...p1Row.querySelectorAll('.chip.unmatched')].map(c => c.textContent) : [];
+  const mChips = p1Row ? [...p1Row.querySelectorAll('.chip.matched')].map(c => c.textContent) : [];
+  check('P1 unmatched chips consolidated in one cell', uChips.slice().sort().join('|'), ['CT HEAD', 'MR BRAIN'].join('|'));
+  check('P1 unmatched tooltip is full description', !!(p1Row && p1Row.querySelector('.chip.unmatched[title="CT HEAD"]')), true);
+  check('P1 matched chip uses template arrow short series', mChips, ['Head and Neck ← CT NECK']);
+  check('P1 last submitted is latest time', p1Row ? p1Row.querySelector('td.time').textContent : '', '13:51:51');
+  check('neither default row is unmatched-only highlight', !!(p1Row && p2Row && !p1Row.classList.contains('alert') && !p2Row.classList.contains('alert')), true);
+  const foot = grid ? [...grid.querySelectorAll('tfoot td')].map(td => td.textContent) : [];
+  check('totals row has patient and unmatched counts', foot[0].indexOf('2 patient') !== -1 && foot[1].indexOf('unmatched') !== -1, true);
+
+  // Clickable name: first/topmost page row for P1 is CT HEAD
+  const pageDoc = window.document;
+  pageDoc.querySelectorAll('#jobs tbody tr').forEach((row, i) => {
+    row.id = 'job-row-' + i;
+    row.addEventListener('click', () => { window.__zclickPageClicks.push(row.id); });
+  });
+  const firstJob = pageDoc.querySelector('#jobs tbody tr');
+  const links = [...root.querySelectorAll('button.patient-link')];
+  check('each patient name is a button', links.length, 2);
+  links[0].click();
+  check('locate scrolls the first matching page row', window.__zclickScrolls[0] && window.__zclickScrolls[0].id, firstJob && firstJob.id);
+  check('locate scroll uses block center', !!(window.__zclickScrolls[0] && window.__zclickScrolls[0].opts && window.__zclickScrolls[0].opts.block === 'center'), true);
+  const outline = firstJob ? String(firstJob.style.outline || '') : '';
+  const bg = firstJob ? String(firstJob.style.backgroundColor || '') : '';
+  check('located row is highlighted', /3px/.test(outline) && (outline.indexOf('1565c0') !== -1 || /rgb\( *21, *101, *192 *\)/.test(outline) || /rgb\( *255, *245, *157 *\)/.test(bg) || bg.indexOf('fff59d') !== -1 || bg.length > 0), true);
+  check('locate does not click the page row', window.__zclickPageClicks.length, 0);
+  check('locate note hidden when row is found', (root.querySelector('.locate-note') || {}).textContent || '', '');
+
+  const missingGroup = { patient: 'BROWN, PAT (222222)', matched: [], unmatched: [{ series: 'CT OTHER', submitted: '2026-11-12 10:00:00' }] };
+  const missingOk = api.locatePatient(missingGroup);
+  check('missing page row returns false', missingOk, false);
+  check('missing page row shows not-on-page note', (root.querySelector('.locate-note') || {}).textContent, 'not on this page');
+  check('missing locate does not log the name', logs.join('\n').indexOf('BROWN, PAT') === -1, true);
+
   window.console.log = origLog;
+}
+
+{
+  const html = '<table id="only">' +
+    '<thead><tr><th>Patient</th><th>Workflow</th><th>Template</th><th>Series Description</th><th>Date Submitted</th></tr></thead>' +
+    '<tbody><tr><td>' + P1 + '</td><td>KP_ROS</td><td>-</td><td>CT HEAD</td><td>2026-11-12 13:51:51</td></tr></tbody></table>';
+  const { api } = loadApi(html);
+  const summary = api.groupByPatient(api.extractRows(), NOW);
+  check('unmatched-only patient count', summary.groups[0] && summary.groups[0].matchedCount, 0);
+  api.addPanel();
+  const root = api.panelRoot();
+  const row = root && root.querySelector('table.grid tbody tr');
+  check('unmatched-only row is highlighted', !!(row && row.classList.contains('alert')), true);
+  check('unmatched-only table still one row per patient', root ? root.querySelectorAll('table.grid tbody tr').length : 0, 1);
 }
 
 {
