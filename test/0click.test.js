@@ -11,10 +11,10 @@ function check(name, got, expected) {
   console.log((ok ? 'PASS' : 'FAIL') + ' ' + name + ' got ' + JSON.stringify(got) + ' expected ' + JSON.stringify(expected));
 }
 
-check('script @version 1.12', /@version\s+1\.12\b/.test(src), true);
-check('script SCRIPT_VERSION', /const SCRIPT_VERSION = '1\.12'/.test(src), true);
-check('script header comment 0click 1.12', /\/\/ 0click 1\.12\b/.test(src), true);
-check('script PANEL_TITLE', /const PANEL_TITLE = '0click 1\.12'/.test(src), true);
+check('script @version 1.13', /@version\s+1\.13\b/.test(src), true);
+check('script SCRIPT_VERSION', /const SCRIPT_VERSION = '1\.13'/.test(src), true);
+check('script header comment 0click 1.13', /\/\/ 0click 1\.13\b/.test(src), true);
+check('script PANEL_TITLE', /const PANEL_TITLE = '0click 1.13'/.test(src), true);
 check('script has no ID copied toast text', src.indexOf('ID copied') === -1, true);
 check('script has no whole-row has-error class', src.indexOf('has-error') === -1, true);
 check('script @run-at document-start', /@run-at\s+document-start/.test(src), true);
@@ -191,7 +191,7 @@ function loadApi(html) {
   check('panel host light DOM has no patient text', light.indexOf(P1_NAME) === -1 && light.indexOf(P2_NAME) === -1 && light.indexOf(P1) === -1 && light.indexOf(P2) === -1, true);
   const root = api.panelRoot();
   check('panel uses closed shadow root', !!(root && root.mode === 'closed'), true);
-  check('panel title is 0click 1.12', !!(root && root.querySelector('.title') && root.querySelector('.title').textContent === '0click 1.12'), true);
+  check('panel title is 0click 1.13', !!(root && root.querySelector('.title') && root.querySelector('.title').textContent === '0click 1.13'), true);
   check('panel has refresh button', !!(root && root.querySelector('.refresh')), true);
   check('panel header has no date-range subtitle', !!(root && !root.querySelector('.range')), true);
   check('panel header has no source line', !!(root && !root.querySelector('.source')), true);
@@ -297,7 +297,13 @@ function loadApi(html) {
   check('footer has no combined or today tally', foot.join(' ').indexOf('3 series') === -1 && foot.join(' ').indexOf('5 series') === -1 && foot.join(' ').indexOf('3 unmatched') === -1, true);
   check('footer has no yesterday section header', !!(grid && grid.querySelector('tfoot') && grid.querySelector('tfoot').textContent.indexOf('YESTERDAY') === -1 && grid.querySelector('tfoot').textContent.indexOf('TODAY') === -1), true);
   check('panel is anchored bottom-right', host && host.style.bottom === '16px' && host.style.right === '16px' && (!host.style.top || host.style.top === 'auto'), true);
-  check('panel is a bit larger with max-height', !!(host && host.style.width === '800px' && host.style.height === '600px' && host.style.minWidth === '600px' && /100vh/.test(host.style.maxHeight) && /32px/.test(host.style.maxHeight)), true);
+  check('panel width stays 800px at the bottom-right', !!(host && host.style.width === '800px' && host.style.minWidth === '600px'), true);
+  check('panel height is auto with no min-height', !!(host && (host.style.height === 'auto' || host.style.height === '') && (!host.style.minHeight || host.style.minHeight === '0px' || host.style.minHeight === 'auto' || host.style.minHeight === '')), true);
+  check('panel max-height caps the shrink-wrap', !!(/600px/.test(host.style.maxHeight) && /85vh/.test(host.style.maxHeight)), true);
+  check('resize handle does not force height', host && host.style.resize, 'horizontal');
+  check('script has no fixed or min panel height', src.indexOf('height:600px') === -1 && src.indexOf('min-height:210px') === -1 && src.indexOf('openHeight') === -1, true);
+  check('body flex does not fill leftover space', /\.body \{[^}]*flex: 0 1 auto/.test(panelCss) && !/\.body \{[^}]*flex: 1 1 auto/.test(panelCss), true);
+  check('wrap shrink-wraps instead of filling 100% height', /\.wrap \{[^}]*height: auto/.test(panelCss) && !/(?<![-\w])height: 100%/.test(panelCss), true);
 
   // Clickable name: first/topmost page row for P1 is CT HEAD
   const pageDoc = window.document;
