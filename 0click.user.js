@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         0click
 // @namespace    https://github.com/mobility22/0click
-// @version      1.17
+// @version      1.18
 // @description  Read-only AutoContour Zero-Click Jobs History summary
 // @match        http://10.240.61.81:18001/*
 // @updateURL    https://raw.githubusercontent.com/mobility22/0click/refs/heads/main/0click.user.js
@@ -22,13 +22,13 @@
 // @inject-into  page
 // ==/UserScript==
 
-// 0click 1.17 — AutoContour Zero-Click Jobs History summary (read-only)
+// 0click 1.18 — AutoContour Zero-Click Jobs History summary (read-only)
 
 (function () {
   'use strict';
   const TAG = '[0click]';
-  const SCRIPT_VERSION = '1.17';
-  const PANEL_TITLE = '0click 1.17';
+  const SCRIPT_VERSION = '1.18';
+  const PANEL_TITLE = '0click 1.18';
   const PANEL_ID = 'zclick-panel';
   const DEBOUNCE_MS = 250;
   const PAGE_SIZE = 500;
@@ -1346,7 +1346,7 @@
       'skipped=' + summary.skippedCount
     );
     if (!(info.state === 'loading' && info.source !== 'api')) {
-      maybeAlertNewUnmatched(today);
+      maybeAlertNewUnmatched(today, summarizeDay(info.rows, 'yesterday'));
     }
     return summary;
   }
@@ -1710,14 +1710,74 @@
       return ('00000000' + x.toString(16)).slice(-8);
     }).join('');
   }
-  function hashAlertKey(patient, day) {
-    return sha256Hex('0click-unmatched|' + String(day) + '|' + String(patient == null ? '' : patient));
+  function hashAlertKey(patient) {
+    return sha256Hex('0click-unmatched|' + String(patient == null ? '' : patient));
   }
   function isUnmatchedOnly(group) {
     return !!(group && group.unmatchedCount > 0 && group.matchedCount === 0);
   }
   function teamsUnmatchedAlertText(n) {
     return '0click: ' + n + ' new unmatched patient(s)';
+  }
+  function unmatchedOnlyPatients(todaySummary, yesterdaySummary) {
+    const seen = Object.create(null);
+    const patients = [];
+    function addFrom(summary) {
+      const groups = (summary && summary.groups) || [];
+      for (let i = 0; i < groups.length; i++) {
+        const g = groups[i];
+        if (!isUnmatchedOnly(g) || !g.patient) continue;
+        const key = String(g.patient);
+        if (seen[key]) continue;
+        seen[key] = true;
+        patients.push(key);
+      }
+    }
+    addFrom(todaySummary);
+    addFrom(yesterdaySummary);
+    return patients;
+  }
+  function alertWindowDates(now) {
+    const range = lastTwoDayRange(now || nowFn());
+    return {
+      today: formatLocalDate(range.end),
+      yesterday: formatLocalDate(range.start)
+    };
+  }
+  function isAlertDayKept(day, now) {
+    const w = alertWindowDates(now);
+    const d = String(day || '');
+    return d === w.today || d === w.yesterday;
+  }
+  function normalizeAlertEntries(parsed) {
+    if (!parsed || typeof parsed !== 'object' || !Array.isArray(parsed.entries)) return [];
+    const out = [];
+    for (let i = 0; i < parsed.entries.length; i++) {
+      const e = parsed.entries[i];
+      if (!e || typeof e.h !== 'string' || !e.h) continue;
+      const day = e.day != null ? String(e.day) : '';
+      if (!day) continue;
+      out.push({ h: e.h, day: day });
+    }
+    return out;
+  }
+  function pruneAlertEntries(entries, now) {
+    const kept = [];
+    const seen = Object.create(null);
+    const list = entries || [];
+    for (let i = 0; i < list.length; i++) {
+      const e = list[i];
+      if (!e || !e.h || !isAlertDayKept(e.day, now)) continue;
+      const prev = seen[e.h];
+      if (prev) {
+        if (String(e.day) < String(prev.day)) prev.day = e.day;
+        continue;
+      }
+      const item = { h: e.h, day: String(e.day) };
+      seen[e.h] = item;
+      kept.push(item);
+    }
+    return kept;
   }
   function teamsAlertsEnabled() {
     try {
@@ -1745,48 +1805,51 @@
     showTeamsNote(ok ? (next ? 'Teams alerts on' : 'Teams alerts off') : 'Teams alerts not changed');
     return next;
   }
-  function loadAlerted(day) {
-    const today = String(day || '');
-    let parsed = null;
+  function serializeAlerted(entries) {
+    return JSON.stringify({ v: 2, entries: entries || [] });
+  }
+  function readAlertedParsed() {
     try {
-      if (typeof GM_getValue === 'function') {
-        const raw = GM_getValue(TEAMS_ALERTED_KEY, '');
-        if (raw) parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
-      }
-    } catch (e) { parsed = null; }
-    const storedDay = parsed && parsed.day != null ? String(parsed.day) : '';
-    const hashes = parsed && Array.isArray(parsed.hashes) ? parsed.hashes.filter(function (h) {
-      return typeof h === 'string' && h;
-    }) : [];
-    if (!today || storedDay !== today) return { day: today, hashes: [] };
-    return { day: today, hashes: hashes };
+      if (typeof GM_getValue !== 'function') return null;
+      const raw = GM_getValue(TEAMS_ALERTED_KEY, '');
+      if (!raw) return null;
+      return typeof raw === 'string' ? JSON.parse(raw) : raw;
+    } catch (e) {
+      return null;
+    }
+  }
+  function loadAlerted(now) {
+    const parsed = readAlertedParsed();
+    const legacy = !!(parsed && Array.isArray(parsed.hashes) && !Array.isArray(parsed.entries));
+    const entries = pruneAlertEntries(normalizeAlertEntries(parsed), now);
+    if (legacy || (parsed && Array.isArray(parsed.entries) && parsed.entries.length !== entries.length)) {
+      saveAlerted({ entries: entries });
+    }
+    return { entries: entries };
   }
   function saveAlerted(state) {
+    const entries = pruneAlertEntries((state && state.entries) || [], nowFn());
     try {
       if (typeof GM_setValue === 'function') {
-        GM_setValue(TEAMS_ALERTED_KEY, JSON.stringify({
-          day: state && state.day ? String(state.day) : '',
-          hashes: ((state && state.hashes) || []).filter(function (h) { return typeof h === 'string' && h; })
-        }));
+        GM_setValue(TEAMS_ALERTED_KEY, serializeAlerted(entries));
         return true;
       }
     } catch (e) { /* ignore */ }
     return false;
   }
-  function maybeAlertNewUnmatched(todaySummary) {
+  function maybeAlertNewUnmatched(todaySummary, yesterdaySummary) {
     if (!teamsAlertsEnabled()) return Promise.resolve({ sent: false, reason: 'disabled' });
     if (!getTeamsWebhook()) return Promise.resolve({ sent: false, reason: 'no-url' });
-    const day = formatLocalDate(nowFn());
-    const stored = loadAlerted(day);
-    const groups = (todaySummary && todaySummary.groups) || [];
+    const now = nowFn();
+    const todayDate = formatLocalDate(now);
+    const stored = loadAlerted(now);
+    const known = Object.create(null);
+    for (let i = 0; i < stored.entries.length; i++) known[stored.entries[i].h] = true;
+    const patients = unmatchedOnlyPatients(todaySummary, yesterdaySummary);
     const fresh = [];
-    for (let i = 0; i < groups.length; i++) {
-      const g = groups[i];
-      if (!isUnmatchedOnly(g)) continue;
-      const h = hashAlertKey(g.patient, day);
-      if (!h) continue;
-      if (stored.hashes.indexOf(h) !== -1) continue;
-      if (teamsAlertPending[h]) continue;
+    for (let i = 0; i < patients.length; i++) {
+      const h = hashAlertKey(patients[i]);
+      if (!h || known[h] || teamsAlertPending[h]) continue;
       fresh.push(h);
     }
     if (!fresh.length) return Promise.resolve({ sent: false, reason: 'none' });
@@ -1794,11 +1857,15 @@
     const text = teamsUnmatchedAlertText(fresh.length);
     return sendTeams(text).then(function (result) {
       if (result && result.sent) {
-        const next = loadAlerted(day);
+        const next = loadAlerted(now);
         const seen = Object.create(null);
-        for (let i = 0; i < next.hashes.length; i++) seen[next.hashes[i]] = true;
-        for (let i = 0; i < fresh.length; i++) seen[fresh[i]] = true;
-        saveAlerted({ day: day, hashes: Object.keys(seen) });
+        for (let i = 0; i < next.entries.length; i++) seen[next.entries[i].h] = true;
+        const entries = next.entries.slice();
+        for (let i = 0; i < fresh.length; i++) {
+          if (seen[fresh[i]]) continue;
+          entries.push({ h: fresh[i], day: todayDate });
+        }
+        saveAlerted({ entries: entries });
       }
       for (let i = 0; i < fresh.length; i++) delete teamsAlertPending[fresh[i]];
       if (result && !result.sent && result.reason !== 'no-url' && result.reason !== 'none' && result.reason !== 'disabled') {
@@ -1839,8 +1906,9 @@
       sendTeams, sendTeamsTest, teamsStatusNote, promptSetTeamsWebhook, registerTeamsMenu,
       webhookTail, teamsWebhookPromptMessage, teamsRequestUrl, teamsErrorDetail, TEAMS_TIMEOUT_MS,
       TEAMS_ALERTED_KEY, TEAMS_ALERTS_ENABLED_KEY, sha256Hex, hashAlertKey, isUnmatchedOnly,
-      teamsUnmatchedAlertText, teamsAlertsEnabled, setTeamsAlertsEnabled, toggleTeamsAlerts,
+      teamsUnmatchedAlertText, unmatchedOnlyPatients, teamsAlertsEnabled, setTeamsAlertsEnabled, toggleTeamsAlerts,
       loadAlerted, saveAlerted, maybeAlertNewUnmatched, resetTeamsAlertState,
+      alertWindowDates, isAlertDayKept, pruneAlertEntries,
       isProblemStatus, countErrorSeries, errorSeriesLines, statusLabel,
       findErrorDomRow, locateErrorSeries, sameStatus,
       setApiRowsForTest: (rows, path) => { apiRows = rows; apiPath = path || '/api/jobs'; apiState = rows ? 'api' : 'idle'; lastJobsUrl = path || lastJobsUrl; },

@@ -11,10 +11,10 @@ function check(name, got, expected) {
   console.log((ok ? 'PASS' : 'FAIL') + ' ' + name + ' got ' + JSON.stringify(got) + ' expected ' + JSON.stringify(expected));
 }
 
-check('script @version 1.17', /@version\s+1\.17\b/.test(src), true);
-check('script SCRIPT_VERSION', /const SCRIPT_VERSION = '1\.17'/.test(src), true);
-check('script header comment 0click 1.17', /\/\/ 0click 1\.17\b/.test(src), true);
-check('script PANEL_TITLE', /const PANEL_TITLE = '0click 1\.17'/.test(src), true);
+check('script @version 1.18', /@version\s+1\.18\b/.test(src), true);
+check('script SCRIPT_VERSION', /const SCRIPT_VERSION = '1\.18'/.test(src), true);
+check('script header comment 0click 1.18', /\/\/ 0click 1\.18\b/.test(src), true);
+check('script PANEL_TITLE', /const PANEL_TITLE = '0click 1\.18'/.test(src), true);
 check('script has no ID copied toast text', src.indexOf('ID copied') === -1, true);
 check('script has no whole-row has-error class', src.indexOf('has-error') === -1, true);
 check('script @run-at document-start', /@run-at\s+document-start/.test(src), true);
@@ -230,7 +230,7 @@ function loadApi(html) {
   check('panel host light DOM has no patient text', light.indexOf(P1_NAME) === -1 && light.indexOf(P2_NAME) === -1 && light.indexOf(P1) === -1 && light.indexOf(P2) === -1, true);
   const root = api.panelRoot();
   check('panel uses closed shadow root', !!(root && root.mode === 'closed'), true);
-  check('panel title is 0click 1.17', !!(root && root.querySelector('.title') && root.querySelector('.title').textContent === '0click 1.17'), true);
+  check('panel title is 0click 1.18', !!(root && root.querySelector('.title') && root.querySelector('.title').textContent === '0click 1.18'), true);
   check('panel has refresh button', !!(root && root.querySelector('.refresh')), true);
   check('panel header has no date-range subtitle', !!(root && !root.querySelector('.range')), true);
   check('panel header has no source line', !!(root && !root.querySelector('.source')), true);
@@ -899,16 +899,29 @@ function hasPhiLeak(text, markers) {
   return markers.some(function (m) { return m && s.indexOf(m) !== -1; });
 }
 
+function alertedEntries(windowObj) {
+  try {
+    const raw = storedAlerted(windowObj);
+    if (!raw) return [];
+    const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
+    return Array.isArray(parsed.entries) ? parsed.entries : [];
+  } catch (e) {
+    return [];
+  }
+}
+function alertedHashes(windowObj) {
+  return alertedEntries(windowObj).map(function (e) { return e.h; }).sort();
+}
+
 function runTeamsAlertTests() {
   const FAKE_HOOK = 'https://example.invalid/teams-webhook';
   const P_ORANGE = 'ORANGE, FAKE (555555)';
   const P_AMBER = 'AMBER, FAKE (666666)';
   const P_GREEN = 'GREEN, FAKE (777777)';
-  const PHI_MARKERS = [P_ORANGE, P_AMBER, P_GREEN, 'ORANGE', 'AMBER', 'GREEN', '555555', '666666', '777777', 'CT HEAD', 'CT ABDOMEN', 'CT PELVIS', '13:00:00', '09:00:00', '12:00:00'];
-  const orangeTodayHtml = jobsTableFromRows([
+  const PHI_MARKERS = [P_ORANGE, P_AMBER, P_GREEN, 'ORANGE', 'AMBER', 'GREEN', '555555', '666666', '777777', 'CT HEAD', 'CT ABDOMEN', 'CT PELVIS', 'CT NECK', '13:00:00', '09:00:00', '12:00:00', '13:10:00'];
+  const todayOnlyHtml = jobsTableFromRows([
     jobRowHtml('Transferred', '-', P_ORANGE, 'KP_ROS', 'CT HEAD', '2026-11-12 13:00:00'),
-    jobRowHtml('Completed', 'Prostate', P_GREEN, 'KP_ROS', 'CT PELVIS', '2026-11-12 12:00:00'),
-    jobRowHtml('Transferred', '-', P_AMBER, 'KP_ROS', 'CT ABDOMEN', '2026-11-11 09:00:00')
+    jobRowHtml('Completed', 'Prostate', P_GREEN, 'KP_ROS', 'CT PELVIS', '2026-11-12 12:00:00')
   ]);
   const yesterdayOnlyHtml = jobsTableFromRows([
     jobRowHtml('Transferred', '-', P_AMBER, 'KP_ROS', 'CT ABDOMEN', '2026-11-11 09:00:00')
@@ -917,21 +930,35 @@ function runTeamsAlertTests() {
     jobRowHtml('Transferred', '-', P_ORANGE, 'KP_ROS', 'CT HEAD', '2026-11-12 13:00:00'),
     jobRowHtml('Transferred', '-', P_AMBER, 'KP_ROS', 'CT ABDOMEN', '2026-11-12 12:00:00')
   ]);
+  const mixedWindowHtml = jobsTableFromRows([
+    jobRowHtml('Transferred', '-', P_ORANGE, 'KP_ROS', 'CT HEAD', '2026-11-12 13:00:00'),
+    jobRowHtml('Completed', 'Prostate', P_GREEN, 'KP_ROS', 'CT PELVIS', '2026-11-12 12:00:00'),
+    jobRowHtml('Transferred', '-', P_AMBER, 'KP_ROS', 'CT ABDOMEN', '2026-11-11 09:00:00')
+  ]);
+  const matchedOnlyHtml = jobsTableFromRows([
+    jobRowHtml('Completed', 'Prostate', P_GREEN, 'KP_ROS', 'CT PELVIS', '2026-11-12 12:00:00'),
+    jobRowHtml('Transferred', '-', P_ORANGE, 'KP_ROS', 'CT HEAD', '2026-11-12 13:00:00'),
+    jobRowHtml('Completed', 'Head and Neck', P_ORANGE, 'KP_ROS', 'CT NECK', '2026-11-12 13:10:00'),
+    jobRowHtml('Completed', 'Prostate', P_AMBER, 'KP_ROS', 'CT ABDOMEN', '2026-11-11 09:00:00')
+  ]);
 
   const { api: hashApi } = loadApi(jobsTableHtml());
   check('sha256 of abc matches the known digest', hashApi.sha256Hex('abc'), 'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad');
   check('sha256 of empty string matches the known digest', hashApi.sha256Hex(''), 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855');
-  const hashed = hashApi.hashAlertKey(P_ORANGE, '2026-11-12');
+  const hashed = hashApi.hashAlertKey(P_ORANGE);
   check('alert hash is a 64-char hex digest', /^[0-9a-f]{64}$/.test(hashed), true);
   check('alert hash does not contain the patient key', hasPhiLeak(hashed, PHI_MARKERS), false);
+  check('alert hash does not include the date', hashed !== hashApi.sha256Hex('0click-unmatched|2026-11-12|' + P_ORANGE), true);
   check('unmatched alert text for 1', hashApi.teamsUnmatchedAlertText(1), '0click: 1 new unmatched patient(s)');
   check('unmatched alert text for 2', hashApi.teamsUnmatchedAlertText(2), '0click: 2 new unmatched patient(s)');
   check('Teams alerts default on', hashApi.teamsAlertsEnabled(), true);
   check('isUnmatchedOnly when orange', hashApi.isUnmatchedOnly({ unmatchedCount: 1, matchedCount: 0 }), true);
   check('isUnmatchedOnly is false when a match exists', hashApi.isUnmatchedOnly({ unmatchedCount: 1, matchedCount: 1 }), false);
   check('isUnmatchedOnly is false when fully matched', hashApi.isUnmatchedOnly({ unmatchedCount: 0, matchedCount: 1 }), false);
+  check('two-day window keeps today and yesterday', hashApi.alertWindowDates(NOW), { today: '2026-11-12', yesterday: '2026-11-11' });
+  check('two-day prune keeps yesterday and today', hashApi.isAlertDayKept('2026-11-11', NOW) && hashApi.isAlertDayKept('2026-11-12', NOW) && !hashApi.isAlertDayKept('2026-11-10', NOW), true);
 
-  const first = loadApi(orangeTodayHtml);
+  const first = loadApi(todayOnlyHtml);
   first.api.setTeamsWebhook(FAKE_HOOK);
   first.window.__zclickGmRequests = [];
   first.window.__zclickGmStatus = 202;
@@ -945,8 +972,8 @@ function runTeamsAlertTests() {
     const raw = storedAlerted(first.window);
     check('alert storage has no patient data', hasPhiLeak(raw, PHI_MARKERS), false);
     const saved = JSON.parse(raw || '{}');
-    check('alert storage is for today only', saved.day, '2026-11-12');
-    check('alert storage has one hash', saved.hashes, [first.api.hashAlertKey(P_ORANGE, '2026-11-12')]);
+    check('alert storage uses the two-day entry format', saved.v, 2);
+    check('alert storage has one dated hash', saved.entries, [{ h: first.api.hashAlertKey(P_ORANGE), day: '2026-11-12' }]);
     first.window.__zclickGmRequests = [];
     first.api.renderBody();
     return Promise.resolve();
@@ -973,11 +1000,46 @@ function runTeamsAlertTests() {
     yest.window.__zclickGmStatus = 202;
     yest.api.addPanel();
     return Promise.resolve().then(function () {
-      check('yesterday unmatched-only rows do not trigger a send', yest.window.__zclickGmRequests.length, 0);
-      check('yesterday-only refresh does not store alert hashes', storedAlerted(yest.window), '');
+      check('yesterday unmatched-only rows trigger one send', yest.window.__zclickGmRequests.length, 1);
+      check('yesterday alert text is the count-only template', alertTextFromRequest(yest.window.__zclickGmRequests[0]), '0click: 1 new unmatched patient(s)');
+      check('yesterday alert text has no patient data', hasPhiLeak(alertTextFromRequest(yest.window.__zclickGmRequests[0]), PHI_MARKERS), false);
+      check('yesterday alert storage has no patient data', hasPhiLeak(storedAlerted(yest.window), PHI_MARKERS), false);
+      check('yesterday alert is stored with today as the alert day', alertedEntries(yest.window), [{ h: yest.api.hashAlertKey(P_AMBER), day: '2026-11-12' }]);
+      yest.window.__zclickGmRequests = [];
+      yest.api.setApiRowsForTest([
+        { patient: P_AMBER, workflow: 'KP_ROS', template: '-', series: 'CT ABDOMEN', submitted: '2026-11-11 09:00:00', status: 'Transferred' },
+        { patient: P_AMBER, workflow: 'KP_ROS', template: '-', series: 'CT HEAD', submitted: '2026-11-12 13:00:00', status: 'Transferred' }
+      ], '/api/jobs');
+      yest.api.renderBody();
+      return Promise.resolve();
+    }).then(function () {
+      check('same patient across yesterday to today is not re-alerted', yest.window.__zclickGmRequests.length, 0);
     });
   }).then(function () {
-    const off = loadApi(orangeTodayHtml);
+    const across = loadApi(todayOnlyHtml);
+    across.api.setTeamsWebhook(FAKE_HOOK);
+    across.api.saveAlerted({ entries: [{ h: across.api.hashAlertKey(P_ORANGE), day: '2026-11-11' }] });
+    across.window.__zclickGmRequests = [];
+    across.window.__zclickGmStatus = 202;
+    across.api.addPanel();
+    return Promise.resolve().then(function () {
+      check('a patient alerted yesterday is not re-alerted today', across.window.__zclickGmRequests.length, 0);
+      check('yesterday alert date is preserved', alertedEntries(across.window), [{ h: across.api.hashAlertKey(P_ORANGE), day: '2026-11-11' }]);
+      across.api.setApiRowsForTest([
+        { patient: P_ORANGE, workflow: 'KP_ROS', template: 'Head and Neck', series: 'CT HEAD', submitted: '2026-11-12 10:00:00', status: 'Completed' }
+      ], '/api/jobs');
+      across.api.renderBody();
+      across.api.setApiRowsForTest([
+        { patient: P_ORANGE, workflow: 'KP_ROS', template: '-', series: 'CT HEAD', submitted: '2026-11-12 13:00:00', status: 'Transferred' }
+      ], '/api/jobs');
+      across.window.__zclickGmRequests = [];
+      across.api.renderBody();
+      return Promise.resolve();
+    }).then(function () {
+      check('match then unmatch after a yesterday alert still does not re-alert', across.window.__zclickGmRequests.length, 0);
+    });
+  }).then(function () {
+    const off = loadApi(todayOnlyHtml);
     off.api.setTeamsWebhook(FAKE_HOOK);
     off.api.setTeamsAlertsEnabled(false);
     off.window.__zclickGmRequests = [];
@@ -1007,13 +1069,60 @@ function runTeamsAlertTests() {
       check('two new unmatched patients send one batched message', two.window.__zclickGmRequests.length, 1);
       check('batched alert text uses N=2', alertTextFromRequest(two.window.__zclickGmRequests[0]), '0click: 2 new unmatched patient(s)');
       check('batched alert text has no patient data', hasPhiLeak(alertTextFromRequest(two.window.__zclickGmRequests[0]), PHI_MARKERS), false);
-      const saved = JSON.parse(storedAlerted(two.window) || '{}');
-      const expected = [two.api.hashAlertKey(P_ORANGE, '2026-11-12'), two.api.hashAlertKey(P_AMBER, '2026-11-12')].sort();
-      check('batched storage has two hashes and no PHI', saved.hashes.slice().sort(), expected);
+      const expected = [two.api.hashAlertKey(P_ORANGE), two.api.hashAlertKey(P_AMBER)].sort();
+      check('batched storage has two hashes and no PHI', alertedHashes(two.window), expected);
       check('batched storage string has no patient data', hasPhiLeak(storedAlerted(two.window), PHI_MARKERS), false);
     });
   }).then(function () {
-    const fail = loadApi(orangeTodayHtml);
+    const mixed = loadApi(mixedWindowHtml);
+    mixed.api.setTeamsWebhook(FAKE_HOOK);
+    mixed.window.__zclickGmRequests = [];
+    mixed.window.__zclickGmStatus = 202;
+    mixed.api.addPanel();
+    return Promise.resolve().then(function () {
+      check('today plus yesterday unmatched send one batched message', mixed.window.__zclickGmRequests.length, 1);
+      check('mixed-window alert text uses N=2', alertTextFromRequest(mixed.window.__zclickGmRequests[0]), '0click: 2 new unmatched patient(s)');
+      check('mixed-window alert text has no patient data', hasPhiLeak(alertTextFromRequest(mixed.window.__zclickGmRequests[0]), PHI_MARKERS), false);
+      check('matched patients in the window are not stored', alertedHashes(mixed.window), [mixed.api.hashAlertKey(P_ORANGE), mixed.api.hashAlertKey(P_AMBER)].sort());
+    });
+  }).then(function () {
+    const matched = loadApi(matchedOnlyHtml);
+    matched.api.setTeamsWebhook(FAKE_HOOK);
+    matched.window.__zclickGmRequests = [];
+    matched.window.__zclickGmStatus = 202;
+    matched.api.addPanel();
+    return Promise.resolve().then(function () {
+      check('matched patients do not trigger an alert', matched.window.__zclickGmRequests.length, 0);
+      check('matched-only refresh does not store alert hashes', storedAlerted(matched.window), '');
+    });
+  }).then(function () {
+    const prune = loadApi(todayOnlyHtml);
+    prune.api.setTeamsWebhook(FAKE_HOOK);
+    const oldHash = prune.api.hashAlertKey(P_ORANGE);
+    const keepHash = prune.api.hashAlertKey(P_AMBER);
+    prune.api.saveAlerted({
+      entries: [
+        { h: oldHash, day: '2026-11-10' },
+        { h: keepHash, day: '2026-11-11' }
+      ]
+    });
+    check('saveAlerted prunes entries older than 2 days', alertedEntries(prune.window), [{ h: keepHash, day: '2026-11-11' }]);
+    prune.window.__zclickGmRequests = [];
+    prune.window.__zclickGmStatus = 202;
+    prune.api.addPanel();
+    return Promise.resolve().then(function () {
+      check('a pruned old entry can alert once if the patient is unmatched again', prune.window.__zclickGmRequests.length, 1);
+      check('pruned-then-alerted text has no patient data', hasPhiLeak(alertTextFromRequest(prune.window.__zclickGmRequests[0]), PHI_MARKERS), false);
+      const entries = alertedEntries(prune.window).slice().sort(function (a, b) { return a.h < b.h ? -1 : a.h > b.h ? 1 : 0; });
+      const expected = [
+        { h: keepHash, day: '2026-11-11' },
+        { h: oldHash, day: '2026-11-12' }
+      ].sort(function (a, b) { return a.h < b.h ? -1 : a.h > b.h ? 1 : 0; });
+      check('kept yesterday entry and stored a new today hash', entries, expected);
+      check('pruned storage has no two-day-old date', storedAlerted(prune.window).indexOf('2026-11-10') === -1, true);
+    });
+  }).then(function () {
+    const fail = loadApi(todayOnlyHtml);
     fail.api.setTeamsWebhook(FAKE_HOOK);
     fail.window.__zclickGmRequests = [];
     fail.window.__zclickGmStatus = 403;
@@ -1030,12 +1139,25 @@ function runTeamsAlertTests() {
       fail.api.renderBody();
       return Promise.resolve().then(function () {
         check('a later successful refresh retries after failure', fail.window.__zclickGmRequests.length, 1);
-        const saved = JSON.parse(storedAlerted(fail.window) || '{}');
-        check('retry stores the hash after success', saved.hashes, [fail.api.hashAlertKey(P_ORANGE, '2026-11-12')]);
+        check('retry stores the hash after success', alertedEntries(fail.window), [{ h: fail.api.hashAlertKey(P_ORANGE), day: '2026-11-12' }]);
       });
     });
   }).then(function () {
-    const none = loadApi(orangeTodayHtml);
+    const legacy = loadApi(todayOnlyHtml);
+    legacy.api.setTeamsWebhook(FAKE_HOOK);
+    legacy.window.__zclickGmValues.teamsAlerted = JSON.stringify({ day: '2026-11-12', hashes: ['deadbeef'] });
+    legacy.window.__zclickGmRequests = [];
+    legacy.window.__zclickGmStatus = 202;
+    legacy.api.addPanel();
+    return Promise.resolve().then(function () {
+      check('legacy v1.17 storage is ignored and may alert once', legacy.window.__zclickGmRequests.length, 1);
+      const saved = JSON.parse(storedAlerted(legacy.window) || '{}');
+      check('legacy storage is migrated to v2 entries', saved.v, 2);
+      check('legacy hashes are not kept', saved.entries, [{ h: legacy.api.hashAlertKey(P_ORANGE), day: '2026-11-12' }]);
+      check('migrated storage has no patient data', hasPhiLeak(storedAlerted(legacy.window), PHI_MARKERS), false);
+    });
+  }).then(function () {
+    const none = loadApi(todayOnlyHtml);
     none.window.__zclickGmRequests = [];
     none.api.addPanel();
     return Promise.resolve().then(function () {
