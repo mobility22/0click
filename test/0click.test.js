@@ -11,24 +11,33 @@ function check(name, got, expected) {
   console.log((ok ? 'PASS' : 'FAIL') + ' ' + name + ' got ' + JSON.stringify(got) + ' expected ' + JSON.stringify(expected));
 }
 
-check('script @version 1.13', /@version\s+1\.13\b/.test(src), true);
-check('script SCRIPT_VERSION', /const SCRIPT_VERSION = '1\.13'/.test(src), true);
-check('script header comment 0click 1.13', /\/\/ 0click 1\.13\b/.test(src), true);
-check('script PANEL_TITLE', /const PANEL_TITLE = '0click 1.13'/.test(src), true);
+check('script @version 1.14', /@version\s+1\.14\b/.test(src), true);
+check('script SCRIPT_VERSION', /const SCRIPT_VERSION = '1\.14'/.test(src), true);
+check('script header comment 0click 1.14', /\/\/ 0click 1\.14\b/.test(src), true);
+check('script PANEL_TITLE', /const PANEL_TITLE = '0click 1\.14'/.test(src), true);
 check('script has no ID copied toast text', src.indexOf('ID copied') === -1, true);
 check('script has no whole-row has-error class', src.indexOf('has-error') === -1, true);
 check('script @run-at document-start', /@run-at\s+document-start/.test(src), true);
 check('script @inject-into page', /@inject-into\s+page/.test(src), true);
 check('script @grant GM_setClipboard', /@grant\s+GM_setClipboard/.test(src), true);
 check('script keeps @grant unsafeWindow', /@grant\s+unsafeWindow/.test(src), true);
+check('script @grant GM_xmlhttpRequest', /@grant\s+GM_xmlhttpRequest/.test(src), true);
+check('script @grant GM_registerMenuCommand', /@grant\s+GM_registerMenuCommand/.test(src), true);
+check('script @grant GM_setValue', /@grant\s+GM_setValue/.test(src), true);
+check('script @grant GM_getValue', /@grant\s+GM_getValue/.test(src), true);
+check('script @connect Power Automate / Teams hosts', src.indexOf('@connect      *.logic.azure.com') !== -1 && src.indexOf('@connect      *.powerplatform.com') !== -1 && src.indexOf('@connect      *.environment.api.powerplatform.com') !== -1 && src.indexOf('@connect      *.webhook.office.com') !== -1, true);
 check('script closed shadow', src.includes("attachShadow({ mode: 'closed' })"), true);
 check('script @downloadURL raw main', src.includes('https://raw.githubusercontent.com/mobility22/0click/refs/heads/main/0click.user.js'), true);
 check('script @match Zero-Click host', src.includes('@match        http://10.240.61.81:18001/*'), true);
 check('PHI-free log: no innerText dump in log()', /log\([^)]*innerText/.test(src), false);
-check('no GM_setValue', !src.includes('GM_setValue') && !src.includes('GM_getValue'), true);
+check('GM_setValue is only used for teamsWebhook', /GM_setValue\(\s*TEAMS_WEBHOOK_KEY/.test(src) && /GM_getValue\(\s*TEAMS_WEBHOOK_KEY/.test(src) && /const TEAMS_WEBHOOK_KEY = 'teamsWebhook'/.test(src) && !/GM_setValue\(\s*['"](?!teamsWebhook)/.test(src), true);
 check('no localStorage of row data', !/localStorage\.(setItem|getItem)/.test(src), true);
 check('debug flag off by default', /const DEBUG = false/.test(src), true);
-check('GET only: no POST/PUT/DELETE issued', !/method:\s*['"]POST['"]/.test(src) && !/method:\s*['"]PUT['"]/.test(src) && !/method:\s*['"]DELETE['"]/.test(src), true);
+check('jobs/page requests stay GET only', /method:\s*'GET'/.test(src) && !/method:\s*['"]PUT['"]/.test(src) && !/method:\s*['"]DELETE['"]/.test(src), true);
+check('POST is only used for the Teams webhook', (src.match(/method:\s*['"]POST['"]/g) || []).length === 1 && /function sendTeams/.test(src), true);
+check('no hardcoded Teams webhook URL', !/https:\/\/[^\s'"]*(logic\.azure\.com|webhook\.office\.com|powerplatform\.com)/.test(src), true);
+check('Teams test message has no patient data', /const TEAMS_TEST_MESSAGE = '0click test OK'/.test(src), true);
+check('no automatic Teams send', (src.match(/sendTeams\(/g) || []).length === 2 && src.indexOf('sendTeams(TEAMS_TEST_MESSAGE)') !== -1 && src.indexOf('sendTeams(text)') !== -1, true);
 
 const userscriptHeader = src.split('(function ()')[0];
 check('userscript header/metadata has no ROS', /ROS/.test(userscriptHeader), false);
@@ -100,6 +109,27 @@ function loadApi(html) {
       window.__zclickClipboard = [];
       window.GM_setClipboard = function (data) {
         window.__zclickClipboard.push({ via: 'gm', data: String(data == null ? '' : data) });
+      };
+      window.__zclickGmValues = {};
+      window.__zclickGmRequests = [];
+      window.__zclickMenu = [];
+      window.GM_getValue = function (key, def) {
+        return Object.prototype.hasOwnProperty.call(window.__zclickGmValues, key)
+          ? window.__zclickGmValues[key]
+          : def;
+      };
+      window.GM_setValue = function (key, val) {
+        window.__zclickGmValues[key] = val;
+      };
+      window.GM_xmlhttpRequest = function (opts) {
+        window.__zclickGmRequests.push(opts);
+        const status = window.__zclickGmStatus != null ? window.__zclickGmStatus : 202;
+        const fail = !!window.__zclickGmError;
+        const cb = fail ? (opts && opts.onerror) : (opts && opts.onload);
+        if (typeof cb === 'function') cb({ status: status });
+      };
+      window.GM_registerMenuCommand = function (title, fn) {
+        window.__zclickMenu.push({ title: String(title), fn: fn });
       };
       const proto = window.HTMLElement.prototype;
       proto.scrollIntoView = function (opts) {
@@ -191,7 +221,7 @@ function loadApi(html) {
   check('panel host light DOM has no patient text', light.indexOf(P1_NAME) === -1 && light.indexOf(P2_NAME) === -1 && light.indexOf(P1) === -1 && light.indexOf(P2) === -1, true);
   const root = api.panelRoot();
   check('panel uses closed shadow root', !!(root && root.mode === 'closed'), true);
-  check('panel title is 0click 1.13', !!(root && root.querySelector('.title') && root.querySelector('.title').textContent === '0click 1.13'), true);
+  check('panel title is 0click 1.14', !!(root && root.querySelector('.title') && root.querySelector('.title').textContent === '0click 1.14'), true);
   check('panel has refresh button', !!(root && root.querySelector('.refresh')), true);
   check('panel header has no date-range subtitle', !!(root && !root.querySelector('.range')), true);
   check('panel header has no source line', !!(root && !root.querySelector('.source')), true);
@@ -676,10 +706,72 @@ function runClipboardFallback() {
   });
 }
 
+function runTeamsTests() {
+  const FAKE_HOOK = 'https://example.invalid/teams-webhook';
+  const { api, window, document } = loadApi(jobsTableHtml());
+  const payload = api.teamsPayload('0click test OK');
+  check('Teams payload type is message', payload.type, 'message');
+  check('Teams payload is an Adaptive Card', !!(payload.attachments && payload.attachments[0] && payload.attachments[0].contentType === 'application/vnd.microsoft.card.adaptive' && payload.attachments[0].content && payload.attachments[0].content.type === 'AdaptiveCard' && payload.attachments[0].content.version === '1.4'), true);
+  check('Teams payload wraps the text', !!(payload.attachments[0].content.body && payload.attachments[0].content.body[0] && payload.attachments[0].content.body[0].type === 'TextBlock' && payload.attachments[0].content.body[0].text === '0click test OK' && payload.attachments[0].content.body[0].wrap === true), true);
+  check('Teams payload has the Adaptive Card schema', payload.attachments[0].content.$schema, 'http://adaptivecards.io/schemas/adaptive-card.json');
+  check('Teams test message has no placeholder names or IDs', payload.attachments[0].content.body[0].text.indexOf('DOE') === -1 && payload.attachments[0].content.body[0].text.indexOf('000000') === -1, true);
+
+  window.__zclickGmRequests = [];
+  return api.sendTeams('0click test OK').then(function (result) {
+    check('sendTeams with no URL does not request', window.__zclickGmRequests.length, 0);
+    check('sendTeams with no URL is not sent', result, { sent: false, reason: 'no-url' });
+    check('empty webhook trims to unset', api.getTeamsWebhook(), '');
+    check('setTeamsWebhook trims and stores only the webhook key', api.setTeamsWebhook('  ' + FAKE_HOOK + '  '), true);
+    check('getTeamsWebhook returns the trimmed URL', api.getTeamsWebhook(), FAKE_HOOK);
+    check('webhook storage key is teamsWebhook', Object.keys(window.__zclickGmValues), ['teamsWebhook']);
+    window.__zclickGmRequests = [];
+    window.__zclickGmStatus = 202;
+    window.__zclickGmError = false;
+    return api.sendTeams(api.TEAMS_TEST_MESSAGE);
+  }).then(function (result) {
+    check('sendTeams with a URL posts once', window.__zclickGmRequests.length, 1);
+    const req = window.__zclickGmRequests[0] || {};
+    check('sendTeams uses POST', req.method, 'POST');
+    check('sendTeams posts to the stored webhook only', req.url, FAKE_HOOK);
+    check('sendTeams Content-Type is JSON', req.headers && req.headers['Content-Type'], 'application/json');
+    const body = JSON.parse(req.data || '{}');
+    check('sendTeams body matches the Adaptive Card payload', body, api.teamsPayload('0click test OK'));
+    check('sendTeams reports success from HTTP 202', result, { sent: true, status: 202 });
+    check('setTeamsWebhook empty clears the URL', api.setTeamsWebhook('   '), true);
+    check('cleared webhook is empty', api.getTeamsWebhook(), '');
+    check('cleared storage is still only teamsWebhook', Object.keys(window.__zclickGmValues), ['teamsWebhook']);
+    window.__zclickGmValues.teamsWebhook = FAKE_HOOK;
+    window.__zclickGmRequests = [];
+    window.__zclickGmStatus = 403;
+    window.__zclickGmError = false;
+    api.addPanel();
+    api.registerTeamsMenu();
+    check('Teams menu commands are registered', window.__zclickMenu.map(function (m) { return m.title; }), ['Set Teams webhook URL', 'Send Teams test']);
+    return api.sendTeamsTest();
+  }).then(function (result) {
+    const note = ((api.panelRoot() && api.panelRoot().querySelector('.locate-note')) || {}).textContent || '';
+    check('Teams test posts the fixed test message only', window.__zclickGmRequests.length, 1);
+    check('Teams test failed note shows the HTTP status only', note, 'Teams test failed (403)');
+    check('Teams test note has no webhook URL', note.indexOf('example.invalid') === -1 && note.indexOf(FAKE_HOOK) === -1, true);
+    check('Teams test note has no patient data', note.indexOf('DOE') === -1 && note.indexOf('000000') === -1, true);
+    check('failed Teams test is not sent', result, { sent: false, status: 403 });
+    window.__zclickGmRequests = [];
+    window.__zclickGmStatus = 202;
+    window.__zclickGmError = false;
+    return api.sendTeamsTest();
+  }).then(function (result) {
+    const note = ((api.panelRoot() && api.panelRoot().querySelector('.locate-note')) || {}).textContent || '';
+    check('Teams test OK note', note, 'Teams test OK');
+    check('successful Teams test is sent', result, { sent: true, status: 202 });
+    const posted = JSON.parse((window.__zclickGmRequests[0] || {}).data || '{}');
+    check('Teams test post text is only the canned message', posted.attachments[0].content.body[0].text, '0click test OK');
+  });
+}
+
 function finish() {
-  Promise.resolve().then(runClipboardFallback).catch(function (err) {
+  Promise.resolve().then(runClipboardFallback).then(runTeamsTests).catch(function (err) {
     failed++;
-    console.log('FAIL clipboard fallback threw ' + String(err && err.message || err));
+    console.log('FAIL clipboard or Teams tests threw ' + String(err && err.message || err));
   }).then(function () {
     if (failed) {
       console.error(failed + ' failed');

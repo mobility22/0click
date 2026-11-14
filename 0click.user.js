@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         0click
 // @namespace    https://github.com/mobility22/0click
-// @version      1.13
+// @version      1.14
 // @description  Read-only AutoContour Zero-Click Jobs History summary
 // @match        http://10.240.61.81:18001/*
 // @updateURL    https://raw.githubusercontent.com/mobility22/0click/refs/heads/main/0click.user.js
@@ -9,16 +9,24 @@
 // @run-at       document-start
 // @grant        unsafeWindow
 // @grant        GM_setClipboard
+// @grant        GM_xmlhttpRequest
+// @grant        GM_registerMenuCommand
+// @grant        GM_setValue
+// @grant        GM_getValue
+// @connect      *.logic.azure.com
+// @connect      *.powerplatform.com
+// @connect      *.environment.api.powerplatform.com
+// @connect      *.webhook.office.com
 // @inject-into  page
 // ==/UserScript==
 
-// 0click 1.13 — AutoContour Zero-Click Jobs History summary (read-only)
+// 0click 1.14 — AutoContour Zero-Click Jobs History summary (read-only)
 
 (function () {
   'use strict';
   const TAG = '[0click]';
-  const SCRIPT_VERSION = '1.13';
-  const PANEL_TITLE = '0click 1.13';
+  const SCRIPT_VERSION = '1.14';
+  const PANEL_TITLE = '0click 1.14';
   const PANEL_ID = 'zclick-panel';
   const DEBOUNCE_MS = 250;
   const PAGE_SIZE = 500;
@@ -1456,6 +1464,131 @@
     window.addEventListener('hashchange', scheduleRefresh);
   }
 
+
+  // Teams webhook (manual only). Store the URL in GM_setValue('teamsWebhook') never in source.
+  // @inject-into page still exposes granted GM_* in Tampermonkey (GM_setClipboard already works);
+  // typeof-guard every call so a host without those APIs just no-ops.
+  const TEAMS_WEBHOOK_KEY = 'teamsWebhook';
+  const TEAMS_TEST_MESSAGE = '0click test OK';
+  function getTeamsWebhook() {
+    try {
+      if (typeof GM_getValue === 'function') {
+        const v = GM_getValue(TEAMS_WEBHOOK_KEY, '');
+        return v == null ? '' : String(v).trim();
+      }
+    } catch (e) { /* ignore */ }
+    return '';
+  }
+  function setTeamsWebhook(url) {
+    const value = url == null ? '' : String(url).trim();
+    try {
+      if (typeof GM_setValue === 'function') {
+        GM_setValue(TEAMS_WEBHOOK_KEY, value);
+        return true;
+      }
+    } catch (e) { /* ignore */ }
+    return false;
+  }
+  function teamsPayload(text) {
+    const msg = text == null ? '' : String(text);
+    return {
+      type: 'message',
+      attachments: [{
+        contentType: 'application/vnd.microsoft.card.adaptive',
+        content: {
+          $schema: 'http://adaptivecards.io/schemas/adaptive-card.json',
+          type: 'AdaptiveCard',
+          version: '1.4',
+          body: [{ type: 'TextBlock', text: msg, wrap: true }]
+        }
+      }]
+    };
+  }
+  function getGmXhr() {
+    try {
+      if (typeof GM_xmlhttpRequest === 'function') return GM_xmlhttpRequest;
+    } catch (e) { /* ignore */ }
+    try {
+      if (typeof GM !== 'undefined' && GM && typeof GM.xmlHttpRequest === 'function') {
+        return function (opts) { return GM.xmlHttpRequest(opts); };
+      }
+    } catch (e2) { /* ignore */ }
+    return null;
+  }
+  function sendTeams(text) {
+    const url = getTeamsWebhook();
+    if (!url) return Promise.resolve({ sent: false, reason: 'no-url' });
+    const xhr = getGmXhr();
+    if (!xhr) return Promise.resolve({ sent: false, reason: 'no-gm' });
+    const data = JSON.stringify(teamsPayload(text));
+    return new Promise(function (resolve) {
+      try {
+        xhr({
+          method: 'POST',
+          url: url,
+          headers: { 'Content-Type': 'application/json' },
+          data: data,
+          onload: function (res) {
+            const status = res && res.status != null ? Number(res.status) : 0;
+            resolve({ sent: status >= 200 && status < 300, status: status });
+          },
+          onerror: function (res) {
+            const status = res && res.status != null ? Number(res.status) : 0;
+            resolve({ sent: false, status: status });
+          },
+          ontimeout: function () {
+            resolve({ sent: false, status: 0 });
+          }
+        });
+      } catch (e) {
+        resolve({ sent: false, status: 0 });
+      }
+    });
+  }
+  function teamsStatusNote(result) {
+    if (!result) return 'Teams test failed';
+    if (result.reason === 'no-url') return 'Teams webhook not set';
+    if (result.reason === 'no-gm') return 'Teams test failed';
+    if (result.sent) return 'Teams test OK';
+    const status = result.status ? String(result.status) : 'failed';
+    return 'Teams test failed (' + status + ')';
+  }
+  function showTeamsNote(msg) {
+    if (panelShadow && panelShadow.querySelector('.locate-note')) {
+      setLocateNote(msg);
+      return;
+    }
+    try {
+      if (typeof alert === 'function') alert(msg);
+    } catch (e) { /* ignore */ }
+  }
+  function promptSetTeamsWebhook() {
+    let entered;
+    try {
+      if (typeof prompt !== 'function') return;
+      entered = prompt('Teams webhook URL (leave empty to clear)', '');
+    } catch (e) { return; }
+    if (entered == null) return;
+    const trimmed = String(entered).trim();
+    const ok = setTeamsWebhook(trimmed);
+    if (!trimmed) showTeamsNote(ok ? 'Teams webhook cleared' : 'Teams webhook not cleared');
+    else showTeamsNote(ok ? 'Teams webhook saved' : 'Teams webhook not saved');
+  }
+  function sendTeamsTest() {
+    return sendTeams(TEAMS_TEST_MESSAGE).then(function (result) {
+      showTeamsNote(teamsStatusNote(result));
+      return result;
+    });
+  }
+  function registerTeamsMenu() {
+    try {
+      if (typeof GM_registerMenuCommand === 'function') {
+        GM_registerMenuCommand('Set Teams webhook URL', promptSetTeamsWebhook);
+        GM_registerMenuCommand('Send Teams test', sendTeamsTest);
+      }
+    } catch (e) { /* GM menu unavailable in this context */ }
+  }
+
   if (typeof globalThis !== 'undefined' && globalThis.ZEROCLICK_TEST) {
     globalThis.ZEROCLICK_API = {
       SCRIPT_VERSION, PANEL_TITLE, PANEL_ID, PAGE_SIZE, DEBUG,
@@ -1470,6 +1603,8 @@
       dayKind, summarizeDay, rowsForDay, MAX_CELL_LINES,
       collectDomJobRows, findPatientDomRow, locatePatient, highlightDomRow, setLocateNote, FLASH_MS,
       extractPatientId, displayPatientName, copyPatientId, writeClipboard, locateNotes,
+      TEAMS_WEBHOOK_KEY, TEAMS_TEST_MESSAGE, getTeamsWebhook, setTeamsWebhook, teamsPayload,
+      sendTeams, sendTeamsTest, teamsStatusNote, promptSetTeamsWebhook, registerTeamsMenu,
       isProblemStatus, countErrorSeries, errorSeriesLines, statusLabel,
       findErrorDomRow, locateErrorSeries, sameStatus,
       setApiRowsForTest: (rows, path) => { apiRows = rows; apiPath = path || '/api/jobs'; apiState = rows ? 'api' : 'idle'; lastJobsUrl = path || lastJobsUrl; },
@@ -1481,6 +1616,7 @@
   installHooks();
   function start() {
     addPanel();
+    registerTeamsMenu();
     hookHistory();
     const root = document.documentElement || document.body;
     if (root && typeof MutationObserver === 'function') {
