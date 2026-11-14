@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         0click
 // @namespace    https://github.com/mobility22/0click
-// @version      1.14
+// @version      1.15
 // @description  Read-only AutoContour Zero-Click Jobs History summary
 // @match        http://10.240.61.81:18001/*
 // @updateURL    https://raw.githubusercontent.com/mobility22/0click/refs/heads/main/0click.user.js
@@ -20,13 +20,13 @@
 // @inject-into  page
 // ==/UserScript==
 
-// 0click 1.14 — AutoContour Zero-Click Jobs History summary (read-only)
+// 0click 1.15 — AutoContour Zero-Click Jobs History summary (read-only)
 
 (function () {
   'use strict';
   const TAG = '[0click]';
-  const SCRIPT_VERSION = '1.14';
-  const PANEL_TITLE = '0click 1.14';
+  const SCRIPT_VERSION = '1.15';
+  const PANEL_TITLE = '0click 1.15';
   const PANEL_ID = 'zclick-panel';
   const DEBOUNCE_MS = 250;
   const PAGE_SIZE = 500;
@@ -1562,17 +1562,41 @@
       if (typeof alert === 'function') alert(msg);
     } catch (e) { /* ignore */ }
   }
+  function webhookTail(url) {
+    const u = url == null ? '' : String(url);
+    if (!u) return '';
+    return u.length <= 6 ? u : u.slice(-6);
+  }
+  function teamsWebhookPromptMessage(current) {
+    const u = current == null ? '' : String(current).trim();
+    const status = u ? ('saved (\u2026' + webhookTail(u) + ')') : 'not set';
+    return 'Teams webhook: ' + status + '\nPaste a new URL, or type CLEAR to remove. Leave empty to keep.';
+  }
   function promptSetTeamsWebhook() {
+    const current = getTeamsWebhook();
     let entered;
     try {
       if (typeof prompt !== 'function') return;
-      entered = prompt('Teams webhook URL (leave empty to clear)', '');
+      entered = prompt(teamsWebhookPromptMessage(current), '');
     } catch (e) { return; }
     if (entered == null) return;
     const trimmed = String(entered).trim();
+    if (!trimmed) {
+      showTeamsNote('Teams webhook unchanged');
+      return;
+    }
+    if (/^clear$/i.test(trimmed)) {
+      const ok = setTeamsWebhook('');
+      showTeamsNote(ok ? 'Teams webhook cleared' : 'Teams webhook not cleared');
+      return;
+    }
+    if (!/^https:\/\//i.test(trimmed)) {
+      showTeamsNote('Teams webhook not saved (must start with https://)');
+      return;
+    }
     const ok = setTeamsWebhook(trimmed);
-    if (!trimmed) showTeamsNote(ok ? 'Teams webhook cleared' : 'Teams webhook not cleared');
-    else showTeamsNote(ok ? 'Teams webhook saved' : 'Teams webhook not saved');
+    if (ok) showTeamsNote('Teams webhook saved (\u2026' + webhookTail(trimmed) + ')');
+    else showTeamsNote('Teams webhook not saved');
   }
   function sendTeamsTest() {
     return sendTeams(TEAMS_TEST_MESSAGE).then(function (result) {
@@ -1605,6 +1629,7 @@
       extractPatientId, displayPatientName, copyPatientId, writeClipboard, locateNotes,
       TEAMS_WEBHOOK_KEY, TEAMS_TEST_MESSAGE, getTeamsWebhook, setTeamsWebhook, teamsPayload,
       sendTeams, sendTeamsTest, teamsStatusNote, promptSetTeamsWebhook, registerTeamsMenu,
+      webhookTail, teamsWebhookPromptMessage,
       isProblemStatus, countErrorSeries, errorSeriesLines, statusLabel,
       findErrorDomRow, locateErrorSeries, sameStatus,
       setApiRowsForTest: (rows, path) => { apiRows = rows; apiPath = path || '/api/jobs'; apiState = rows ? 'api' : 'idle'; lastJobsUrl = path || lastJobsUrl; },
