@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         0click
 // @namespace    https://github.com/mobility22/0click
-// @version      1.16
+// @version      1.17
 // @description  Read-only AutoContour Zero-Click Jobs History summary
 // @match        http://10.240.61.81:18001/*
 // @updateURL    https://raw.githubusercontent.com/mobility22/0click/refs/heads/main/0click.user.js
@@ -22,13 +22,13 @@
 // @inject-into  page
 // ==/UserScript==
 
-// 0click 1.16 — AutoContour Zero-Click Jobs History summary (read-only)
+// 0click 1.17 — AutoContour Zero-Click Jobs History summary (read-only)
 
 (function () {
   'use strict';
   const TAG = '[0click]';
-  const SCRIPT_VERSION = '1.16';
-  const PANEL_TITLE = '0click 1.16';
+  const SCRIPT_VERSION = '1.17';
+  const PANEL_TITLE = '0click 1.17';
   const PANEL_ID = 'zclick-panel';
   const DEBOUNCE_MS = 250;
   const PAGE_SIZE = 500;
@@ -1345,6 +1345,9 @@
       'unmatched=' + summary.unmatchedCount,
       'skipped=' + summary.skippedCount
     );
+    if (!(info.state === 'loading' && info.source !== 'api')) {
+      maybeAlertNewUnmatched(today);
+    }
     return summary;
   }
   function applyCollapsed() {
@@ -1467,7 +1470,7 @@
   }
 
 
-  // Teams webhook (manual only). Store the URL in GM_setValue('teamsWebhook') never in source.
+  // Teams webhook. Store the URL under the teamsWebhook key, never in source. Auto-alerts use counts only, never PHI.
   // @inject-into page still exposes granted GM_* in Tampermonkey (GM_setClipboard already works);
   // typeof-guard every call so a host without those APIs just no-ops.
   const TEAMS_WEBHOOK_KEY = 'teamsWebhook';
@@ -1631,11 +1634,189 @@
       return result;
     });
   }
+  const TEAMS_ALERTED_KEY = 'teamsAlerted';
+  const TEAMS_ALERTS_ENABLED_KEY = 'teamsAlertsEnabled';
+  let teamsAlertPending = Object.create(null);
+
+  function utf8Bytes(text) {
+    const str = String(text == null ? '' : text);
+    const out = [];
+    for (let i = 0; i < str.length; i++) {
+      let c = str.charCodeAt(i);
+      if (c < 0x80) out.push(c);
+      else if (c < 0x800) out.push(0xc0 | (c >> 6), 0x80 | (c & 0x3f));
+      else if (c >= 0xd800 && c <= 0xdbff && i + 1 < str.length) {
+        const c2 = str.charCodeAt(i + 1);
+        if (c2 >= 0xdc00 && c2 <= 0xdfff) {
+          c = 0x10000 + ((c & 0x3ff) << 10) + (c2 & 0x3ff);
+          i++;
+          out.push(0xf0 | (c >> 18), 0x80 | ((c >> 12) & 0x3f), 0x80 | ((c >> 6) & 0x3f), 0x80 | (c & 0x3f));
+          continue;
+        }
+        out.push(0xef, 0xbf, 0xbd);
+      } else out.push(0xe0 | (c >> 12), 0x80 | ((c >> 6) & 0x3f), 0x80 | (c & 0x3f));
+    }
+    return out;
+  }
+  function rotr32(n, x) {
+    return ((x >>> n) | (x << (32 - n))) >>> 0;
+  }
+  function sha256Hex(text) {
+    const K = [
+      0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
+      0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
+      0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+      0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
+      0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
+      0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+      0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+      0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2
+    ];
+    const bytes = utf8Bytes(text);
+    const bitLen = bytes.length * 8;
+    bytes.push(0x80);
+    while ((bytes.length % 64) !== 56) bytes.push(0);
+    const hi = Math.floor(bitLen / 0x100000000);
+    const lo = bitLen >>> 0;
+    bytes.push((hi >>> 24) & 255, (hi >>> 16) & 255, (hi >>> 8) & 255, hi & 255);
+    bytes.push((lo >>> 24) & 255, (lo >>> 16) & 255, (lo >>> 8) & 255, lo & 255);
+    let h0 = 0x6a09e667, h1 = 0xbb67ae85, h2 = 0x3c6ef372, h3 = 0xa54ff53a;
+    let h4 = 0x510e527f, h5 = 0x9b05688c, h6 = 0x1f83d9ab, h7 = 0x5be0cd19;
+    for (let off = 0; off < bytes.length; off += 64) {
+      const w = [];
+      for (let i = 0; i < 16; i++) {
+        const j = off + i * 4;
+        w[i] = ((bytes[j] << 24) | (bytes[j + 1] << 16) | (bytes[j + 2] << 8) | bytes[j + 3]) >>> 0;
+      }
+      for (let i = 16; i < 64; i++) {
+        const s0 = rotr32(7, w[i - 15]) ^ rotr32(18, w[i - 15]) ^ (w[i - 15] >>> 3);
+        const s1 = rotr32(17, w[i - 2]) ^ rotr32(19, w[i - 2]) ^ (w[i - 2] >>> 10);
+        w[i] = (w[i - 16] + s0 + w[i - 7] + s1) >>> 0;
+      }
+      let a = h0, b = h1, c = h2, d = h3, e = h4, f = h5, g = h6, h = h7;
+      for (let i = 0; i < 64; i++) {
+        const S1 = rotr32(6, e) ^ rotr32(11, e) ^ rotr32(25, e);
+        const ch = (e & f) ^ (~e & g);
+        const t1 = (h + S1 + ch + K[i] + w[i]) >>> 0;
+        const S0 = rotr32(2, a) ^ rotr32(13, a) ^ rotr32(22, a);
+        const maj = (a & b) ^ (a & c) ^ (b & c);
+        const t2 = (S0 + maj) >>> 0;
+        h = g; g = f; f = e; e = (d + t1) >>> 0; d = c; c = b; b = a; a = (t1 + t2) >>> 0;
+      }
+      h0 = (h0 + a) >>> 0; h1 = (h1 + b) >>> 0; h2 = (h2 + c) >>> 0; h3 = (h3 + d) >>> 0;
+      h4 = (h4 + e) >>> 0; h5 = (h5 + f) >>> 0; h6 = (h6 + g) >>> 0; h7 = (h7 + h) >>> 0;
+    }
+    return [h0, h1, h2, h3, h4, h5, h6, h7].map(function (x) {
+      return ('00000000' + x.toString(16)).slice(-8);
+    }).join('');
+  }
+  function hashAlertKey(patient, day) {
+    return sha256Hex('0click-unmatched|' + String(day) + '|' + String(patient == null ? '' : patient));
+  }
+  function isUnmatchedOnly(group) {
+    return !!(group && group.unmatchedCount > 0 && group.matchedCount === 0);
+  }
+  function teamsUnmatchedAlertText(n) {
+    return '0click: ' + n + ' new unmatched patient(s)';
+  }
+  function teamsAlertsEnabled() {
+    try {
+      if (typeof GM_getValue === 'function') {
+        const v = GM_getValue(TEAMS_ALERTS_ENABLED_KEY, true);
+        if (v === false || v === 'false' || v === 0 || v === '0') return false;
+        return true;
+      }
+    } catch (e) { /* ignore */ }
+    return true;
+  }
+  function setTeamsAlertsEnabled(on) {
+    const value = !!on;
+    try {
+      if (typeof GM_setValue === 'function') {
+        GM_setValue(TEAMS_ALERTS_ENABLED_KEY, value);
+        return true;
+      }
+    } catch (e) { /* ignore */ }
+    return false;
+  }
+  function toggleTeamsAlerts() {
+    const next = !teamsAlertsEnabled();
+    const ok = setTeamsAlertsEnabled(next);
+    showTeamsNote(ok ? (next ? 'Teams alerts on' : 'Teams alerts off') : 'Teams alerts not changed');
+    return next;
+  }
+  function loadAlerted(day) {
+    const today = String(day || '');
+    let parsed = null;
+    try {
+      if (typeof GM_getValue === 'function') {
+        const raw = GM_getValue(TEAMS_ALERTED_KEY, '');
+        if (raw) parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
+      }
+    } catch (e) { parsed = null; }
+    const storedDay = parsed && parsed.day != null ? String(parsed.day) : '';
+    const hashes = parsed && Array.isArray(parsed.hashes) ? parsed.hashes.filter(function (h) {
+      return typeof h === 'string' && h;
+    }) : [];
+    if (!today || storedDay !== today) return { day: today, hashes: [] };
+    return { day: today, hashes: hashes };
+  }
+  function saveAlerted(state) {
+    try {
+      if (typeof GM_setValue === 'function') {
+        GM_setValue(TEAMS_ALERTED_KEY, JSON.stringify({
+          day: state && state.day ? String(state.day) : '',
+          hashes: ((state && state.hashes) || []).filter(function (h) { return typeof h === 'string' && h; })
+        }));
+        return true;
+      }
+    } catch (e) { /* ignore */ }
+    return false;
+  }
+  function maybeAlertNewUnmatched(todaySummary) {
+    if (!teamsAlertsEnabled()) return Promise.resolve({ sent: false, reason: 'disabled' });
+    if (!getTeamsWebhook()) return Promise.resolve({ sent: false, reason: 'no-url' });
+    const day = formatLocalDate(nowFn());
+    const stored = loadAlerted(day);
+    const groups = (todaySummary && todaySummary.groups) || [];
+    const fresh = [];
+    for (let i = 0; i < groups.length; i++) {
+      const g = groups[i];
+      if (!isUnmatchedOnly(g)) continue;
+      const h = hashAlertKey(g.patient, day);
+      if (!h) continue;
+      if (stored.hashes.indexOf(h) !== -1) continue;
+      if (teamsAlertPending[h]) continue;
+      fresh.push(h);
+    }
+    if (!fresh.length) return Promise.resolve({ sent: false, reason: 'none' });
+    for (let i = 0; i < fresh.length; i++) teamsAlertPending[fresh[i]] = true;
+    const text = teamsUnmatchedAlertText(fresh.length);
+    return sendTeams(text).then(function (result) {
+      if (result && result.sent) {
+        const next = loadAlerted(day);
+        const seen = Object.create(null);
+        for (let i = 0; i < next.hashes.length; i++) seen[next.hashes[i]] = true;
+        for (let i = 0; i < fresh.length; i++) seen[fresh[i]] = true;
+        saveAlerted({ day: day, hashes: Object.keys(seen) });
+      }
+      for (let i = 0; i < fresh.length; i++) delete teamsAlertPending[fresh[i]];
+      if (result && !result.sent && result.reason !== 'no-url' && result.reason !== 'none' && result.reason !== 'disabled') {
+        showTeamsNote(teamsStatusNote(result));
+      }
+      return result;
+    });
+  }
+  function resetTeamsAlertState() {
+    teamsAlertPending = Object.create(null);
+  }
+
   function registerTeamsMenu() {
     try {
       if (typeof GM_registerMenuCommand === 'function') {
         GM_registerMenuCommand('Set Teams webhook URL', promptSetTeamsWebhook);
         GM_registerMenuCommand('Send Teams test', sendTeamsTest);
+        GM_registerMenuCommand('Teams alerts: on/off', toggleTeamsAlerts);
       }
     } catch (e) { /* GM menu unavailable in this context */ }
   }
@@ -1657,6 +1838,9 @@
       TEAMS_WEBHOOK_KEY, TEAMS_TEST_MESSAGE, getTeamsWebhook, setTeamsWebhook, teamsPayload,
       sendTeams, sendTeamsTest, teamsStatusNote, promptSetTeamsWebhook, registerTeamsMenu,
       webhookTail, teamsWebhookPromptMessage, teamsRequestUrl, teamsErrorDetail, TEAMS_TIMEOUT_MS,
+      TEAMS_ALERTED_KEY, TEAMS_ALERTS_ENABLED_KEY, sha256Hex, hashAlertKey, isUnmatchedOnly,
+      teamsUnmatchedAlertText, teamsAlertsEnabled, setTeamsAlertsEnabled, toggleTeamsAlerts,
+      loadAlerted, saveAlerted, maybeAlertNewUnmatched, resetTeamsAlertState,
       isProblemStatus, countErrorSeries, errorSeriesLines, statusLabel,
       findErrorDomRow, locateErrorSeries, sameStatus,
       setApiRowsForTest: (rows, path) => { apiRows = rows; apiPath = path || '/api/jobs'; apiState = rows ? 'api' : 'idle'; lastJobsUrl = path || lastJobsUrl; },

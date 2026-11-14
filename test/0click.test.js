@@ -11,10 +11,10 @@ function check(name, got, expected) {
   console.log((ok ? 'PASS' : 'FAIL') + ' ' + name + ' got ' + JSON.stringify(got) + ' expected ' + JSON.stringify(expected));
 }
 
-check('script @version 1.16', /@version\s+1\.16\b/.test(src), true);
-check('script SCRIPT_VERSION', /const SCRIPT_VERSION = '1\.16'/.test(src), true);
-check('script header comment 0click 1.16', /\/\/ 0click 1\.16\b/.test(src), true);
-check('script PANEL_TITLE', /const PANEL_TITLE = '0click 1\.16'/.test(src), true);
+check('script @version 1.17', /@version\s+1\.17\b/.test(src), true);
+check('script SCRIPT_VERSION', /const SCRIPT_VERSION = '1\.17'/.test(src), true);
+check('script header comment 0click 1.17', /\/\/ 0click 1\.17\b/.test(src), true);
+check('script PANEL_TITLE', /const PANEL_TITLE = '0click 1\.17'/.test(src), true);
 check('script has no ID copied toast text', src.indexOf('ID copied') === -1, true);
 check('script has no whole-row has-error class', src.indexOf('has-error') === -1, true);
 check('script @run-at document-start', /@run-at\s+document-start/.test(src), true);
@@ -31,14 +31,14 @@ check('script closed shadow', src.includes("attachShadow({ mode: 'closed' })"), 
 check('script @downloadURL raw main', src.includes('https://raw.githubusercontent.com/mobility22/0click/refs/heads/main/0click.user.js'), true);
 check('script @match Zero-Click host', src.includes('@match        http://10.240.61.81:18001/*'), true);
 check('PHI-free log: no innerText dump in log()', /log\([^)]*innerText/.test(src), false);
-check('GM_setValue is only used for teamsWebhook', /GM_setValue\(\s*TEAMS_WEBHOOK_KEY/.test(src) && /GM_getValue\(\s*TEAMS_WEBHOOK_KEY/.test(src) && /const TEAMS_WEBHOOK_KEY = 'teamsWebhook'/.test(src) && !/GM_setValue\(\s*['"](?!teamsWebhook)/.test(src), true);
+check('GM_setValue keys are webhook, alerted hashes, and alert toggle', /const TEAMS_WEBHOOK_KEY = 'teamsWebhook'/.test(src) && /const TEAMS_ALERTED_KEY = 'teamsAlerted'/.test(src) && /const TEAMS_ALERTS_ENABLED_KEY = 'teamsAlertsEnabled'/.test(src) && /GM_setValue\(\s*TEAMS_WEBHOOK_KEY/.test(src) && /GM_setValue\(\s*TEAMS_ALERTED_KEY/.test(src) && /GM_setValue\(\s*TEAMS_ALERTS_ENABLED_KEY/.test(src) && /GM_getValue\(\s*TEAMS_WEBHOOK_KEY/.test(src) && /GM_getValue\(\s*TEAMS_ALERTED_KEY/.test(src) && /GM_getValue\(\s*TEAMS_ALERTS_ENABLED_KEY/.test(src) && !/GM_setValue\(\s*['"]/.test(src) && !/GM_getValue\(\s*['"]/.test(src), true);
 check('no localStorage of row data', !/localStorage\.(setItem|getItem)/.test(src), true);
 check('debug flag off by default', /const DEBUG = false/.test(src), true);
 check('jobs/page requests stay GET only', /method:\s*'GET'/.test(src) && !/method:\s*['"]PUT['"]/.test(src) && !/method:\s*['"]DELETE['"]/.test(src), true);
 check('POST is only used for the Teams webhook', (src.match(/method:\s*['"]POST['"]/g) || []).length === 1 && /function sendTeams/.test(src), true);
 check('no hardcoded Teams webhook URL', !/https:\/\/[^\s'"]*(logic\.azure\.com|webhook\.office\.com|powerplatform\.com)/.test(src), true);
 check('Teams test message has no patient data', /const TEAMS_TEST_MESSAGE = '0click test OK'/.test(src), true);
-check('no automatic Teams send', (src.match(/sendTeams\(/g) || []).length === 2 && src.indexOf('sendTeams(TEAMS_TEST_MESSAGE)') !== -1 && src.indexOf('sendTeams(text)') !== -1, true);
+check('sendTeams is only used for the test menu and unmatched alerts', (src.match(/sendTeams\(/g) || []).length === 3 && src.indexOf('sendTeams(TEAMS_TEST_MESSAGE)') !== -1 && src.indexOf('sendTeams(text)') !== -1 && /function maybeAlertNewUnmatched/.test(src) && /function teamsUnmatchedAlertText/.test(src) && src.indexOf("'0click: ' + n + ' new unmatched patient(s)'") !== -1, true);
 
 const userscriptHeader = src.split('(function ()')[0];
 check('userscript header/metadata has no ROS', /ROS/.test(userscriptHeader), false);
@@ -230,7 +230,7 @@ function loadApi(html) {
   check('panel host light DOM has no patient text', light.indexOf(P1_NAME) === -1 && light.indexOf(P2_NAME) === -1 && light.indexOf(P1) === -1 && light.indexOf(P2) === -1, true);
   const root = api.panelRoot();
   check('panel uses closed shadow root', !!(root && root.mode === 'closed'), true);
-  check('panel title is 0click 1.16', !!(root && root.querySelector('.title') && root.querySelector('.title').textContent === '0click 1.16'), true);
+  check('panel title is 0click 1.17', !!(root && root.querySelector('.title') && root.querySelector('.title').textContent === '0click 1.17'), true);
   check('panel has refresh button', !!(root && root.querySelector('.refresh')), true);
   check('panel header has no date-range subtitle', !!(root && !root.querySelector('.range')), true);
   check('panel header has no source line', !!(root && !root.querySelector('.source')), true);
@@ -821,7 +821,7 @@ function runTeamsTests() {
     window.__zclickGmStatus = 403;
     window.__zclickGmError = false;
     api.registerTeamsMenu();
-    check('Teams menu commands are registered', window.__zclickMenu.map(function (m) { return m.title; }), ['Set Teams webhook URL', 'Send Teams test']);
+    check('Teams menu commands are registered', window.__zclickMenu.map(function (m) { return m.title; }), ['Set Teams webhook URL', 'Send Teams test', 'Teams alerts: on/off']);
     return api.sendTeamsTest();
   }).then(function (result) {
     const note = ((api.panelRoot() && api.panelRoot().querySelector('.locate-note')) || {}).textContent || '';
@@ -873,8 +873,179 @@ function runTeamsTests() {
   });
 }
 
+
+function jobRowHtml(status, template, patient, workflow, series, submitted) {
+  return '<tr><td>' + status + '</td><td>' + template + '</td><td>' + patient + '</td><td>' + workflow +
+    '</td><td>' + series + '</td><td>' + submitted + '</td><td>CT</td></tr>';
+}
+function jobsTableFromRows(rows) {
+  return '<table id="jobs"><thead><tr>' +
+    '<th>Status</th><th>Template</th><th>Patient</th><th>Workflow</th>' +
+    '<th>Series Description</th><th>Date Submitted</th><th>Modality</th></tr></thead><tbody>' +
+    rows.join('') + '</tbody></table>';
+}
+function alertTextFromRequest(req) {
+  try {
+    return JSON.parse((req && req.data) || '{}').attachments[0].content.body[0].text;
+  } catch (e) {
+    return '';
+  }
+}
+function storedAlerted(windowObj) {
+  return windowObj.__zclickGmValues.teamsAlerted || '';
+}
+function hasPhiLeak(text, markers) {
+  const s = String(text == null ? '' : text);
+  return markers.some(function (m) { return m && s.indexOf(m) !== -1; });
+}
+
+function runTeamsAlertTests() {
+  const FAKE_HOOK = 'https://example.invalid/teams-webhook';
+  const P_ORANGE = 'ORANGE, FAKE (555555)';
+  const P_AMBER = 'AMBER, FAKE (666666)';
+  const P_GREEN = 'GREEN, FAKE (777777)';
+  const PHI_MARKERS = [P_ORANGE, P_AMBER, P_GREEN, 'ORANGE', 'AMBER', 'GREEN', '555555', '666666', '777777', 'CT HEAD', 'CT ABDOMEN', 'CT PELVIS', '13:00:00', '09:00:00', '12:00:00'];
+  const orangeTodayHtml = jobsTableFromRows([
+    jobRowHtml('Transferred', '-', P_ORANGE, 'KP_ROS', 'CT HEAD', '2026-11-12 13:00:00'),
+    jobRowHtml('Completed', 'Prostate', P_GREEN, 'KP_ROS', 'CT PELVIS', '2026-11-12 12:00:00'),
+    jobRowHtml('Transferred', '-', P_AMBER, 'KP_ROS', 'CT ABDOMEN', '2026-11-11 09:00:00')
+  ]);
+  const yesterdayOnlyHtml = jobsTableFromRows([
+    jobRowHtml('Transferred', '-', P_AMBER, 'KP_ROS', 'CT ABDOMEN', '2026-11-11 09:00:00')
+  ]);
+  const twoOrangeHtml = jobsTableFromRows([
+    jobRowHtml('Transferred', '-', P_ORANGE, 'KP_ROS', 'CT HEAD', '2026-11-12 13:00:00'),
+    jobRowHtml('Transferred', '-', P_AMBER, 'KP_ROS', 'CT ABDOMEN', '2026-11-12 12:00:00')
+  ]);
+
+  const { api: hashApi } = loadApi(jobsTableHtml());
+  check('sha256 of abc matches the known digest', hashApi.sha256Hex('abc'), 'ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad');
+  check('sha256 of empty string matches the known digest', hashApi.sha256Hex(''), 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855');
+  const hashed = hashApi.hashAlertKey(P_ORANGE, '2026-11-12');
+  check('alert hash is a 64-char hex digest', /^[0-9a-f]{64}$/.test(hashed), true);
+  check('alert hash does not contain the patient key', hasPhiLeak(hashed, PHI_MARKERS), false);
+  check('unmatched alert text for 1', hashApi.teamsUnmatchedAlertText(1), '0click: 1 new unmatched patient(s)');
+  check('unmatched alert text for 2', hashApi.teamsUnmatchedAlertText(2), '0click: 2 new unmatched patient(s)');
+  check('Teams alerts default on', hashApi.teamsAlertsEnabled(), true);
+  check('isUnmatchedOnly when orange', hashApi.isUnmatchedOnly({ unmatchedCount: 1, matchedCount: 0 }), true);
+  check('isUnmatchedOnly is false when a match exists', hashApi.isUnmatchedOnly({ unmatchedCount: 1, matchedCount: 1 }), false);
+  check('isUnmatchedOnly is false when fully matched', hashApi.isUnmatchedOnly({ unmatchedCount: 0, matchedCount: 1 }), false);
+
+  const first = loadApi(orangeTodayHtml);
+  first.api.setTeamsWebhook(FAKE_HOOK);
+  first.window.__zclickGmRequests = [];
+  first.window.__zclickGmStatus = 202;
+  first.window.__zclickGmMode = 'load';
+  first.api.addPanel();
+  return Promise.resolve().then(function () {
+    check('new today unmatched-only patient sends once', first.window.__zclickGmRequests.length, 1);
+    const text = alertTextFromRequest(first.window.__zclickGmRequests[0]);
+    check('auto-alert text is the count-only template', text, '0click: 1 new unmatched patient(s)');
+    check('auto-alert text has no patient data', hasPhiLeak(text, PHI_MARKERS), false);
+    const raw = storedAlerted(first.window);
+    check('alert storage has no patient data', hasPhiLeak(raw, PHI_MARKERS), false);
+    const saved = JSON.parse(raw || '{}');
+    check('alert storage is for today only', saved.day, '2026-11-12');
+    check('alert storage has one hash', saved.hashes, [first.api.hashAlertKey(P_ORANGE, '2026-11-12')]);
+    first.window.__zclickGmRequests = [];
+    first.api.renderBody();
+    return Promise.resolve();
+  }).then(function () {
+    check('repeated refresh does not resend', first.window.__zclickGmRequests.length, 0);
+    first.api.setApiRowsForTest([
+      { patient: P_ORANGE, workflow: 'KP_ROS', template: 'Head and Neck', series: 'CT HEAD', submitted: '2026-11-12 13:00:00', status: 'Completed' }
+    ], '/api/jobs');
+    first.api.renderBody();
+    return Promise.resolve();
+  }).then(function () {
+    check('gaining a match does not send', first.window.__zclickGmRequests.length, 0);
+    first.api.setApiRowsForTest([
+      { patient: P_ORANGE, workflow: 'KP_ROS', template: '-', series: 'CT HEAD', submitted: '2026-11-12 13:00:00', status: 'Transferred' }
+    ], '/api/jobs');
+    first.api.renderBody();
+    return Promise.resolve();
+  }).then(function () {
+    check('losing a match later the same day does not re-alert', first.window.__zclickGmRequests.length, 0);
+
+    const yest = loadApi(yesterdayOnlyHtml);
+    yest.api.setTeamsWebhook(FAKE_HOOK);
+    yest.window.__zclickGmRequests = [];
+    yest.window.__zclickGmStatus = 202;
+    yest.api.addPanel();
+    return Promise.resolve().then(function () {
+      check('yesterday unmatched-only rows do not trigger a send', yest.window.__zclickGmRequests.length, 0);
+      check('yesterday-only refresh does not store alert hashes', storedAlerted(yest.window), '');
+    });
+  }).then(function () {
+    const off = loadApi(orangeTodayHtml);
+    off.api.setTeamsWebhook(FAKE_HOOK);
+    off.api.setTeamsAlertsEnabled(false);
+    off.window.__zclickGmRequests = [];
+    off.window.__zclickGmStatus = 202;
+    off.api.addPanel();
+    return Promise.resolve().then(function () {
+      check('toggle off disables auto-alerts', off.window.__zclickGmRequests.length, 0);
+      check('toggle off leaves alert storage empty', storedAlerted(off.window), '');
+      check('teamsAlertsEnabled is false after toggle off', off.api.teamsAlertsEnabled(), false);
+      off.api.toggleTeamsAlerts();
+      const note = ((off.api.panelRoot() && off.api.panelRoot().querySelector('.locate-note')) || {}).textContent || '';
+      check('toggle back on shows a panel note', note, 'Teams alerts on');
+      off.window.__zclickGmRequests = [];
+      off.api.renderBody();
+      return Promise.resolve().then(function () {
+        check('toggle on then refresh sends the missed alert once', off.window.__zclickGmRequests.length, 1);
+        check('re-enabled alert text is still count-only', alertTextFromRequest(off.window.__zclickGmRequests[0]), '0click: 1 new unmatched patient(s)');
+      });
+    });
+  }).then(function () {
+    const two = loadApi(twoOrangeHtml);
+    two.api.setTeamsWebhook(FAKE_HOOK);
+    two.window.__zclickGmRequests = [];
+    two.window.__zclickGmStatus = 202;
+    two.api.addPanel();
+    return Promise.resolve().then(function () {
+      check('two new unmatched patients send one batched message', two.window.__zclickGmRequests.length, 1);
+      check('batched alert text uses N=2', alertTextFromRequest(two.window.__zclickGmRequests[0]), '0click: 2 new unmatched patient(s)');
+      check('batched alert text has no patient data', hasPhiLeak(alertTextFromRequest(two.window.__zclickGmRequests[0]), PHI_MARKERS), false);
+      const saved = JSON.parse(storedAlerted(two.window) || '{}');
+      const expected = [two.api.hashAlertKey(P_ORANGE, '2026-11-12'), two.api.hashAlertKey(P_AMBER, '2026-11-12')].sort();
+      check('batched storage has two hashes and no PHI', saved.hashes.slice().sort(), expected);
+      check('batched storage string has no patient data', hasPhiLeak(storedAlerted(two.window), PHI_MARKERS), false);
+    });
+  }).then(function () {
+    const fail = loadApi(orangeTodayHtml);
+    fail.api.setTeamsWebhook(FAKE_HOOK);
+    fail.window.__zclickGmRequests = [];
+    fail.window.__zclickGmStatus = 403;
+    fail.api.addPanel();
+    return Promise.resolve().then(function () {
+      check('failed auto-alert still attempts one send', fail.window.__zclickGmRequests.length, 1);
+      const note = ((fail.api.panelRoot() && fail.api.panelRoot().querySelector('.locate-note')) || {}).textContent || '';
+      check('failed auto-alert shows the existing status note', note, 'Teams test failed (403)');
+      check('failed auto-alert does not store hashes', storedAlerted(fail.window), '');
+      const body = fail.api.panelRoot() && fail.api.panelRoot().querySelector('.body');
+      check('failed auto-alert does not block the panel', !!(body && body.querySelector('table.grid')), true);
+      fail.window.__zclickGmRequests = [];
+      fail.window.__zclickGmStatus = 202;
+      fail.api.renderBody();
+      return Promise.resolve().then(function () {
+        check('a later successful refresh retries after failure', fail.window.__zclickGmRequests.length, 1);
+        const saved = JSON.parse(storedAlerted(fail.window) || '{}');
+        check('retry stores the hash after success', saved.hashes, [fail.api.hashAlertKey(P_ORANGE, '2026-11-12')]);
+      });
+    });
+  }).then(function () {
+    const none = loadApi(orangeTodayHtml);
+    none.window.__zclickGmRequests = [];
+    none.api.addPanel();
+    return Promise.resolve().then(function () {
+      check('no webhook means no auto-alert request', none.window.__zclickGmRequests.length, 0);
+    });
+  });
+}
+
 function finish() {
-  Promise.resolve().then(runClipboardFallback).then(runTeamsTests).catch(function (err) {
+  Promise.resolve().then(runClipboardFallback).then(runTeamsTests).then(runTeamsAlertTests).catch(function (err) {
     failed++;
     console.log('FAIL clipboard or Teams tests threw ' + String(err && err.message || err));
   }).then(function () {
