@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         0click
 // @namespace    https://github.com/mobility22/0click
-// @version      1.15
+// @version      1.16
 // @description  Read-only AutoContour Zero-Click Jobs History summary
 // @match        http://10.240.61.81:18001/*
 // @updateURL    https://raw.githubusercontent.com/mobility22/0click/refs/heads/main/0click.user.js
@@ -13,20 +13,22 @@
 // @grant        GM_registerMenuCommand
 // @grant        GM_setValue
 // @grant        GM_getValue
-// @connect      *.logic.azure.com
-// @connect      *.powerplatform.com
-// @connect      *.environment.api.powerplatform.com
-// @connect      *.webhook.office.com
+// @connect      powerplatform.com
+// @connect      api.powerplatform.com
+// @connect      environment.api.powerplatform.com
+// @connect      logic.azure.com
+// @connect      webhook.office.com
+// @connect      *
 // @inject-into  page
 // ==/UserScript==
 
-// 0click 1.15 — AutoContour Zero-Click Jobs History summary (read-only)
+// 0click 1.16 — AutoContour Zero-Click Jobs History summary (read-only)
 
 (function () {
   'use strict';
   const TAG = '[0click]';
-  const SCRIPT_VERSION = '1.15';
-  const PANEL_TITLE = '0click 1.15';
+  const SCRIPT_VERSION = '1.16';
+  const PANEL_TITLE = '0click 1.16';
   const PANEL_ID = 'zclick-panel';
   const DEBOUNCE_MS = 250;
   const PAGE_SIZE = 500;
@@ -1515,11 +1517,28 @@
     } catch (e2) { /* ignore */ }
     return null;
   }
+  const TEAMS_TIMEOUT_MS = 15000;
+  function teamsRequestUrl(url) {
+    const u = url == null ? '' : String(url).trim();
+    if (!u) return '';
+    return u.replace(/^(https:\/\/[^/?#]+):443(?=[/?#]|$)/i, '$1');
+  }
+  function teamsErrorDetail(res) {
+    let raw = '';
+    if (res) {
+      if (res.error != null && String(res.error).trim()) raw = String(res.error);
+      else if (res.statusText != null && String(res.statusText).trim()) raw = String(res.statusText);
+    }
+    raw = raw.replace(/https?:\/\/\S+/gi, '').replace(/\s+/g, ' ').trim();
+    if (raw.length > 60) raw = raw.slice(0, 60);
+    return raw;
+  }
   function sendTeams(text) {
-    const url = getTeamsWebhook();
-    if (!url) return Promise.resolve({ sent: false, reason: 'no-url' });
+    const stored = getTeamsWebhook();
+    if (!stored) return Promise.resolve({ sent: false, reason: 'no-url' });
     const xhr = getGmXhr();
     if (!xhr) return Promise.resolve({ sent: false, reason: 'no-gm' });
+    const url = teamsRequestUrl(stored);
     const data = JSON.stringify(teamsPayload(text));
     return new Promise(function (resolve) {
       try {
@@ -1528,28 +1547,36 @@
           url: url,
           headers: { 'Content-Type': 'application/json' },
           data: data,
+          timeout: TEAMS_TIMEOUT_MS,
           onload: function (res) {
             const status = res && res.status != null ? Number(res.status) : 0;
             resolve({ sent: status >= 200 && status < 300, status: status });
           },
           onerror: function (res) {
             const status = res && res.status != null ? Number(res.status) : 0;
-            resolve({ sent: false, status: status });
+            resolve({ sent: false, status: status, reason: 'blocked/network', error: teamsErrorDetail(res) });
           },
           ontimeout: function () {
-            resolve({ sent: false, status: 0 });
+            resolve({ sent: false, status: 0, reason: 'timeout' });
           }
         });
       } catch (e) {
-        resolve({ sent: false, status: 0 });
+        resolve({ sent: false, status: 0, reason: 'blocked/network', error: teamsErrorDetail({ error: e && e.message }) });
       }
     });
   }
   function teamsStatusNote(result) {
     if (!result) return 'Teams test failed';
     if (result.reason === 'no-url') return 'Teams webhook not set';
-    if (result.reason === 'no-gm') return 'Teams test failed';
+    if (result.reason === 'no-gm') return 'Teams test failed (no-gm)';
+    if (result.reason === 'timeout') return 'Teams test failed (timeout)';
     if (result.sent) return 'Teams test OK';
+    if (result.reason === 'blocked/network') {
+      const detail = result.error ? String(result.error) : '';
+      return detail
+        ? ('Teams test failed (blocked/network: ' + detail + ')')
+        : 'Teams test failed (blocked/network)';
+    }
     const status = result.status ? String(result.status) : 'failed';
     return 'Teams test failed (' + status + ')';
   }
@@ -1629,7 +1656,7 @@
       extractPatientId, displayPatientName, copyPatientId, writeClipboard, locateNotes,
       TEAMS_WEBHOOK_KEY, TEAMS_TEST_MESSAGE, getTeamsWebhook, setTeamsWebhook, teamsPayload,
       sendTeams, sendTeamsTest, teamsStatusNote, promptSetTeamsWebhook, registerTeamsMenu,
-      webhookTail, teamsWebhookPromptMessage,
+      webhookTail, teamsWebhookPromptMessage, teamsRequestUrl, teamsErrorDetail, TEAMS_TIMEOUT_MS,
       isProblemStatus, countErrorSeries, errorSeriesLines, statusLabel,
       findErrorDomRow, locateErrorSeries, sameStatus,
       setApiRowsForTest: (rows, path) => { apiRows = rows; apiPath = path || '/api/jobs'; apiState = rows ? 'api' : 'idle'; lastJobsUrl = path || lastJobsUrl; },

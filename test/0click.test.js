@@ -11,10 +11,10 @@ function check(name, got, expected) {
   console.log((ok ? 'PASS' : 'FAIL') + ' ' + name + ' got ' + JSON.stringify(got) + ' expected ' + JSON.stringify(expected));
 }
 
-check('script @version 1.15', /@version\s+1\.15\b/.test(src), true);
-check('script SCRIPT_VERSION', /const SCRIPT_VERSION = '1\.15'/.test(src), true);
-check('script header comment 0click 1.15', /\/\/ 0click 1\.15\b/.test(src), true);
-check('script PANEL_TITLE', /const PANEL_TITLE = '0click 1\.15'/.test(src), true);
+check('script @version 1.16', /@version\s+1\.16\b/.test(src), true);
+check('script SCRIPT_VERSION', /const SCRIPT_VERSION = '1\.16'/.test(src), true);
+check('script header comment 0click 1.16', /\/\/ 0click 1\.16\b/.test(src), true);
+check('script PANEL_TITLE', /const PANEL_TITLE = '0click 1\.16'/.test(src), true);
 check('script has no ID copied toast text', src.indexOf('ID copied') === -1, true);
 check('script has no whole-row has-error class', src.indexOf('has-error') === -1, true);
 check('script @run-at document-start', /@run-at\s+document-start/.test(src), true);
@@ -25,7 +25,8 @@ check('script @grant GM_xmlhttpRequest', /@grant\s+GM_xmlhttpRequest/.test(src),
 check('script @grant GM_registerMenuCommand', /@grant\s+GM_registerMenuCommand/.test(src), true);
 check('script @grant GM_setValue', /@grant\s+GM_setValue/.test(src), true);
 check('script @grant GM_getValue', /@grant\s+GM_getValue/.test(src), true);
-check('script @connect Power Automate / Teams hosts', src.indexOf('@connect      *.logic.azure.com') !== -1 && src.indexOf('@connect      *.powerplatform.com') !== -1 && src.indexOf('@connect      *.environment.api.powerplatform.com') !== -1 && src.indexOf('@connect      *.webhook.office.com') !== -1, true);
+check('script @connect uses bare domains plus * fallback', src.indexOf('@connect      powerplatform.com') !== -1 && src.indexOf('@connect      api.powerplatform.com') !== -1 && src.indexOf('@connect      environment.api.powerplatform.com') !== -1 && src.indexOf('@connect      logic.azure.com') !== -1 && src.indexOf('@connect      webhook.office.com') !== -1 && /@connect\s+\*/.test(src) && src.indexOf('*.logic.azure.com') === -1 && src.indexOf('*.powerplatform.com') === -1 && src.indexOf('*.webhook.office.com') === -1, true);
+check('script @connect * is last', src.lastIndexOf('@connect      *') > src.lastIndexOf('@connect      webhook.office.com'), true);
 check('script closed shadow', src.includes("attachShadow({ mode: 'closed' })"), true);
 check('script @downloadURL raw main', src.includes('https://raw.githubusercontent.com/mobility22/0click/refs/heads/main/0click.user.js'), true);
 check('script @match Zero-Click host', src.includes('@match        http://10.240.61.81:18001/*'), true);
@@ -123,10 +124,18 @@ function loadApi(html) {
       };
       window.GM_xmlhttpRequest = function (opts) {
         window.__zclickGmRequests.push(opts);
+        const mode = window.__zclickGmMode || (window.__zclickGmError ? 'error' : 'load');
+        if (mode === 'timeout') {
+          if (typeof opts.ontimeout === 'function') opts.ontimeout();
+          return;
+        }
+        if (mode === 'error') {
+          const err = window.__zclickGmErrorRes || { status: window.__zclickGmStatus != null ? window.__zclickGmStatus : 0 };
+          if (typeof opts.onerror === 'function') opts.onerror(err);
+          return;
+        }
         const status = window.__zclickGmStatus != null ? window.__zclickGmStatus : 202;
-        const fail = !!window.__zclickGmError;
-        const cb = fail ? (opts && opts.onerror) : (opts && opts.onload);
-        if (typeof cb === 'function') cb({ status: status });
+        if (typeof opts.onload === 'function') opts.onload({ status: status });
       };
       window.GM_registerMenuCommand = function (title, fn) {
         window.__zclickMenu.push({ title: String(title), fn: fn });
@@ -221,7 +230,7 @@ function loadApi(html) {
   check('panel host light DOM has no patient text', light.indexOf(P1_NAME) === -1 && light.indexOf(P2_NAME) === -1 && light.indexOf(P1) === -1 && light.indexOf(P2) === -1, true);
   const root = api.panelRoot();
   check('panel uses closed shadow root', !!(root && root.mode === 'closed'), true);
-  check('panel title is 0click 1.15', !!(root && root.querySelector('.title') && root.querySelector('.title').textContent === '0click 1.15'), true);
+  check('panel title is 0click 1.16', !!(root && root.querySelector('.title') && root.querySelector('.title').textContent === '0click 1.16'), true);
   check('panel has refresh button', !!(root && root.querySelector('.refresh')), true);
   check('panel header has no date-range subtitle', !!(root && !root.querySelector('.range')), true);
   check('panel header has no source line', !!(root && !root.querySelector('.source')), true);
@@ -737,6 +746,22 @@ function runTeamsTests() {
     const body = JSON.parse(req.data || '{}');
     check('sendTeams body matches the Adaptive Card payload', body, api.teamsPayload('0click test OK'));
     check('sendTeams reports success from HTTP 202', result, { sent: true, status: 202 });
+    const req0 = window.__zclickGmRequests[0] || {};
+    check('sendTeams sets a 15s timeout', req0.timeout, 15000);
+    check('strips :443 from https webhook URLs', api.teamsRequestUrl('https://example.invalid:443/workflows/x'), 'https://example.invalid/workflows/x');
+    check('strips trailing :443 with no path', api.teamsRequestUrl('https://example.invalid:443'), 'https://example.invalid');
+    check('leaves other ports alone', api.teamsRequestUrl('https://example.invalid:8443/x'), 'https://example.invalid:8443/x');
+    check('leaves http :443 alone', api.teamsRequestUrl('http://example.invalid:443/x'), 'http://example.invalid:443/x');
+    const PORT_HOOK = 'https://example.invalid:443/teams-webhook';
+    check('setTeamsWebhook stores the :443 URL unchanged', api.setTeamsWebhook(PORT_HOOK), true);
+    window.__zclickGmRequests = [];
+    window.__zclickGmMode = 'load';
+    window.__zclickGmStatus = 202;
+    return api.sendTeams(api.TEAMS_TEST_MESSAGE);
+  }).then(function (result) {
+    check('sendTeams request strips :443', (window.__zclickGmRequests[0] || {}).url, 'https://example.invalid/teams-webhook');
+    check('stored webhook still has :443', api.getTeamsWebhook(), 'https://example.invalid:443/teams-webhook');
+    check('striped :443 request still succeeds', result, { sent: true, status: 202 });
     check('setTeamsWebhook empty still stores an empty value', api.setTeamsWebhook('   '), true);
     check('cleared webhook is empty', api.getTeamsWebhook(), '');
     check('cleared storage is still only teamsWebhook', Object.keys(window.__zclickGmValues), ['teamsWebhook']);
@@ -815,6 +840,36 @@ function runTeamsTests() {
     check('successful Teams test is sent', result, { sent: true, status: 202 });
     const posted = JSON.parse((window.__zclickGmRequests[0] || {}).data || '{}');
     check('Teams test post text is only the canned message', posted.attachments[0].content.body[0].text, '0click test OK');
+    window.__zclickGmRequests = [];
+    window.__zclickGmMode = 'error';
+    window.__zclickGmErrorRes = { status: 0, error: 'Refused to connect to https://example.invalid/teams-webhook because it is not in @connect' };
+    return api.sendTeamsTest();
+  }).then(function (result) {
+    const note = ((api.panelRoot() && api.panelRoot().querySelector('.locate-note')) || {}).textContent || '';
+    check('onerror note uses blocked/network reason', note.indexOf('Teams test failed (blocked/network: ') === 0, true);
+    check('onerror note has no webhook URL', note.indexOf('https://') === -1 && note.indexOf('example.invalid') === -1 && note.indexOf(FAKE_HOOK) === -1, true);
+    check('onerror detail is truncated to 60 characters', note.length <= 'Teams test failed (blocked/network: '.length + 60 + 1, true);
+    check('onerror result reason is blocked/network', result.reason, 'blocked/network');
+    check('onerror note mentions the short error', /because it is not in @connect/.test(note), true);
+    window.__zclickGmRequests = [];
+    window.__zclickGmMode = 'timeout';
+    return api.sendTeamsTest();
+  }).then(function (result) {
+    const note = ((api.panelRoot() && api.panelRoot().querySelector('.locate-note')) || {}).textContent || '';
+    check('timeout note', note, 'Teams test failed (timeout)');
+    check('timeout result', result, { sent: false, status: 0, reason: 'timeout' });
+    const savedXhr = window.GM_xmlhttpRequest;
+    window.GM_xmlhttpRequest = undefined;
+    window.GM = undefined;
+    window.__zclickGmRequests = [];
+    return api.sendTeamsTest().then(function (res) {
+      window.GM_xmlhttpRequest = savedXhr;
+      window.__zclickGmMode = 'load';
+      const note2 = ((api.panelRoot() && api.panelRoot().querySelector('.locate-note')) || {}).textContent || '';
+      check('no-gm does not send a request', window.__zclickGmRequests.length, 0);
+      check('no-gm note', note2, 'Teams test failed (no-gm)');
+      check('no-gm result', res, { sent: false, reason: 'no-gm' });
+    });
   });
 }
 
